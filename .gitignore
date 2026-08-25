@@ -1,0 +1,7 @@
+node_modules
+dist
+*.local
+.DS_Store
+
+# Book files are kept out of this repo entirely — see README.
+public/books/

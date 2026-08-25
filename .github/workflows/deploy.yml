@@ -1,0 +1,73 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Pull the protected content source and publish it as ciphertext only.
+      # Its identity lives in secrets, so nothing in this repo — code,
+      # history, or logs — reveals where the files come from.
+      #
+      # Required secrets (Repo → Settings → Secrets and variables → Actions):
+      #   CONTENT_REPO       owner/name of the private content source
+      #   CONTENT_TOKEN      fine-grained PAT, Contents: Read-only on it
+      #   BOOKS_PASSPHRASE   passphrase used by scripts/encrypt-books.mjs
+      - name: Fetch content source
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: ${{ secrets.CONTENT_REPO }}
+          ref: main
+          token: ${{ secrets.CONTENT_TOKEN }}
+          path: content-source
+
+      - name: Publish encrypted library
+        env:
+          BOOKS_PASSPHRASE: ${{ secrets.BOOKS_PASSPHRASE }}
+        run: |
+          if [ ! -d content-source ]; then
+            echo "::warning::Content source unavailable (missing CONTENT_REPO or CONTENT_TOKEN) — deploying WITHOUT the library."
+            exit 0
+          fi
+          mkdir -p dist/books
+          # Fails the deploy when BOOKS_PASSPHRASE is unset — by design:
+          # plaintext must never be published.
+          node scripts/encrypt-books.mjs --in content-source --out dist/books
+          echo "Published $(ls dist/books/*.enc | wc -l | tr -d ' ') encrypted file(s)"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

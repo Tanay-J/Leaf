@@ -1,0 +1,894 @@
+/* Design language ported from the frontend-roadmap app:
+   same variables, fonts, cards, pills, and light/dark theming. */
+
+:root {
+  color-scheme: light;
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", Fira Code, monospace;
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-sidebar: #ffffff;
+  --border-color: #e2e8f0;
+  --border-color-light: #f1f5f9;
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --text-subtle: #64748b;
+  --primary-color: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-bg: #eff6ff;
+  --tag-bg: #f8fafc;
+  --code-bg: #f1f5f9;
+}
+
+html.dark-theme {
+  color-scheme: dark;
+  --bg-app: #090d16;
+  --bg-card: #111827;
+  --bg-sidebar: #0d111c;
+  --border-color: #1f293d;
+  --border-color-light: #162032;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+  --primary-color: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-bg: #1e293b;
+  --tag-bg: #162032;
+  --code-bg: #172033;
+}
+
+/* Warm "old paper" palette for sepia reading mode */
+html.sepia-theme {
+  color-scheme: light;
+  --bg-app: #f4ead8;
+  --bg-card: #faf3e3;
+  --bg-sidebar: #f9f0de;
+  --border-color: #e2d3b6;
+  --border-color-light: #ece0c6;
+  --text-main: #3d3325;
+  --text-muted: #6b5c46;
+  --text-subtle: #8d7d63;
+  --primary-color: #a16207;
+  --primary-hover: #854d0e;
+  --primary-bg: #f0e2c0;
+  --tag-bg: #efe2c4;
+  --code-bg: #eee0bf;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  background: var(--bg-app);
+  color: var(--text-main);
+  transition: background-color 0.25s ease, color 0.25s ease;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* ---------- Topbar (shared) ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-app) 85%, transparent);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.brand-block {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+html.dark-theme .brand-mark {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+}
+
+.eyebrow {
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.brand-text h1 {
+  margin: 2px 0 0;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.search-shell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  padding: 8px 14px;
+  flex: 0 1 320px;
+}
+
+.search-shell input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.icon-btn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.secondary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-weight: 700;
+  padding: 8px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.secondary-action:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+/* ---------- Library ---------- */
+
+.content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 24px 56px;
+}
+
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 18px;
+}
+
+.book-card {
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-card);
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.03);
+  transition: all 0.18s ease;
+}
+
+.book-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--primary-color);
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.1);
+}
+
+.book-cover {
+  position: relative;
+  height: 140px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+}
+
+html.dark-theme .book-cover {
+  background: linear-gradient(135deg, #1d4ed8, #1e293b);
+}
+
+.book-cover svg {
+  opacity: 0.9;
+}
+
+.pill {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.pill-epub {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.pill-pdf {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.book-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.book-body h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.book-author {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.book-progress {
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+.progress-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border-color);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary-color);
+  transition: width 0.3s ease;
+}
+
+.empty-state {
+  border: 1.5px dashed var(--border-color);
+  border-radius: 12px;
+  padding: 52px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-subtle);
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.footnote {
+  max-width: 1100px;
+  margin: 26px auto 0;
+  padding: 0 24px;
+  color: var(--text-subtle);
+  font-size: 12.5px;
+}
+
+.footnote code {
+  font-family: var(--font-mono);
+  background: var(--code-bg);
+  border: 1px solid var(--border-color-light);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* ---------- Reader shell ---------- */
+
+.reader-shell {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.reader-topbar {
+  position: static;
+  flex-wrap: wrap;
+}
+
+.reader-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.reader-title strong {
+  font-size: 15px;
+  font-weight: 800;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reader-title span {
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+.control-select {
+  max-width: 220px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: 0;
+}
+
+.mini-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.mini-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.pos-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-subtle);
+  min-width: 44px;
+  text-align: center;
+}
+
+/* ---------- Reader body: collapsible sidebar + stage ---------- */
+
+.reader-body {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.reader-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-card);
+  overflow: hidden auto;
+  transition: width 0.2s ease, border-color 0.2s ease;
+}
+
+.reader-sidebar.collapsed {
+  width: 0;
+  border-right-color: transparent;
+}
+
+.reader-sidebar-inner {
+  min-width: 244px; /* keep content stable while collapsing */
+  padding: 16px 12px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reader-sidebar-title {
+  margin: 4px 8px 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 7px 10px;
+  border-radius: 8px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.toc-item:hover:not(:disabled) {
+  background: var(--tag-bg);
+  color: var(--primary-color);
+}
+
+.toc-item.active {
+  background: var(--primary-bg);
+  color: var(--primary-color);
+  font-weight: 700;
+}
+
+.toc-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reader-sidebar-empty {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-subtle);
+}
+
+/* ---------- Reader stage ---------- */
+
+.reader-stage {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-app);
+}
+
+.format-reader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Keep a comfortable reading measure instead of stretching edge to edge. */
+.epub-viewer,
+.pdf-scroll {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.epub-viewer {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Night-reading trick: invert rendered book content in dark theme */
+html.dark-theme .epub-viewer iframe {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Sepia reading: the epub body tint is injected from EpubReader; the PDF
+   page is warmed by multiplying the canvas over the paper-colored stage. */
+html.sepia-theme .pdf-canvas {
+  mix-blend-mode: multiply;
+}
+
+.pdf-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 16px;
+}
+
+.pdf-canvas {
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+html.dark-theme .pdf-canvas {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.reader-navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.nav-btn:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nav-pos {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-jump input {
+  width: 56px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 12.5px;
+  text-align: center;
+  outline: 0;
+}
+
+/* ---------- Overlays ---------- */
+
+.pane-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-subtle);
+  font-size: 13.5px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--bg-app) 70%, transparent);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error-pane {
+  position: absolute;
+  inset: 16px;
+  z-index: 6;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+  border-radius: 12px;
+  padding: 22px;
+  overflow: auto;
+}
+
+html.dark-theme .error-pane {
+  border-color: #7f1d1d;
+  background: #450a0a;
+  color: #fecaca;
+}
+
+.error-pane strong {
+  font-size: 15px;
+}
+
+.error-pane p {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* ---------- Library view switcher (grid / list) ---------- */
+
+.view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+  flex-shrink: 0;
+}
+
+.view-btn {
+  width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-subtle);
+  transition: all 0.15s ease;
+}
+
+.view-btn:hover {
+  color: var(--primary-color);
+}
+
+.view-btn.active {
+  background: var(--primary-bg);
+  color: var(--primary-color);
+}
+
+.book-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.book-list-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-card);
+  padding: 12px 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.03);
+  transition: all 0.18s ease;
+}
+
+.book-list-row:hover {
+  border-color: var(--primary-color);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.08);
+}
+
+.book-list-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+}
+
+html.dark-theme .book-list-icon {
+  background: linear-gradient(135deg, #1d4ed8, #1e293b);
+}
+
+.book-list-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.book-list-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.book-list-author {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.book-list-progress {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+/* In list rows the type pill sits inline, not floating on a cover. */
+.book-list-row .pill {
+  position: static;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 720px) {
+  .topbar {
+    padding: 12px 14px;
+  }
+
+  .content {
+    padding: 20px 14px 44px;
+  }
+
+  .search-shell {
+    flex-basis: 150px;
+  }
+
+  .reader-title span {
+    display: none;
+  }
+
+  .book-list-progress {
+    display: none;
+  }
+
+  /* On small screens the contents pane floats over the page instead of
+     squeezing the reading area. */
+  .reader-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  }
+/* ---- Passphrase gate ---------------------------------------------- */
+.passphrase-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  text-align: center;
+  background: var(--bg-card, #fff);
+  color: #1f2937;
+  padding: 28px 30px;
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.passphrase-gate svg {
+  opacity: 0.7;
+}
+
+.passphrase-gate .gate-hint {
+  margin: 0;
+  font-size: 12.5px;
+  opacity: 0.65;
+}
+
+.passphrase-gate .gate-error {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+.passphrase-gate input {
+  width: 240px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  font: inherit;
+  background: #fff;
+  color: #111827;
+}
+
+.passphrase-gate input:focus {
+  outline: 2px solid #16a34a;
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.passphrase-gate button {
+  padding: 9px 18px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  background: #16a34a;
+  color: #fff;
+}
+
+.passphrase-gate button:hover {
+  background: #15803d;
+}
+
+}

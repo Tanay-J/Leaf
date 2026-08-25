@@ -1,0 +1,26 @@
+{
+  "name": "leaf",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build && node scripts/prune-plain-books.mjs",
+    "preview": "vite preview",
+    "encrypt-books": "node scripts/encrypt-books.mjs --in public/books --out public/books"
+  },
+  "dependencies": {
+    "epubjs": "^0.3.93",
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

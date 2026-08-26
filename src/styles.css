@@ -796,6 +796,345 @@ html.dark-theme .book-list-icon {
   position: static;
 }
 
+/* ---------- Reading list ---------- */
+
+.nav-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.brand-mark-articles {
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+}
+
+html.dark-theme .brand-mark-articles {
+  background: linear-gradient(135deg, #60a5fa, #2563eb);
+}
+
+.add-article {
+  display: flex;
+  gap: 10px;
+  margin: 4px 0 18px;
+}
+
+.add-article-input {
+  flex: 1;
+  max-width: 680px;
+}
+
+.add-article-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.add-article-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 16px;
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+  transition: background-color 0.15s ease;
+}
+
+.add-article-btn:hover {
+  background: var(--primary-hover);
+}
+
+.article-error {
+  margin: -10px 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+.article-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.article-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-card);
+  padding: 12px 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.article-row:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.08);
+}
+
+.article-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.article-status {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--border-color);
+}
+
+.article-status.unread {
+  background: var(--primary-color);
+}
+
+.article-row-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.article-row-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.article-row-meta {
+  font-size: 12px;
+  color: var(--text-subtle);
+}
+
+.empty-hint {
+  font-size: 13px;
+  color: var(--text-subtle);
+  text-align: center;
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+.bookmarklet-section {
+  margin-top: 28px;
+  padding: 16px 18px;
+  border: 1px dashed var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.bookmarklet-section strong {
+  color: var(--text-main);
+}
+
+.bookmarklet-section p {
+  margin: 6px 0 10px;
+}
+
+.bookmarklet {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: 9px;
+  background: var(--primary-bg);
+  color: var(--primary-color);
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.bookmarklet:hover {
+  background: color-mix(in srgb, var(--primary-bg) 80%, var(--primary-color));
+}
+
+/* ---------- Article reader ---------- */
+
+.article-reader {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.article-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+.article-scroll {
+  height: 100%;
+  overflow-y: auto;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 30px 36px 72px;
+}
+
+.article-prose {
+  color: var(--text-main);
+  font-size: 16.5px;
+  line-height: 1.8;
+}
+
+.article-prose > *:first-child {
+  margin-top: 0;
+}
+
+.article-prose h1,
+.article-prose h2,
+.article-prose h3,
+.article-prose h4 {
+  line-height: 1.3;
+  margin: 1.6em 0 0.5em;
+  color: var(--text-main);
+  font-weight: 800;
+}
+
+.article-prose h1 {
+  font-size: 1.6em;
+}
+
+.article-prose h2 {
+  font-size: 1.35em;
+}
+
+.article-prose h3 {
+  font-size: 1.15em;
+}
+
+.article-prose h4 {
+  font-size: 1em;
+}
+
+.article-prose p {
+  margin: 0 0 1.1em;
+}
+
+.article-prose a {
+  color: var(--primary-color);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.article-prose ul,
+.article-prose ol {
+  margin: 0 0 1.1em;
+  padding-left: 1.4em;
+}
+
+.article-prose li {
+  margin: 0.25em 0;
+}
+
+.article-prose blockquote {
+  margin: 1.2em 0;
+  padding: 2px 0 2px 18px;
+  border-left: 3px solid var(--primary-color);
+  color: var(--text-muted);
+}
+
+.article-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 1.2em 0;
+}
+
+.article-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--border-color-light);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.article-prose pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0 0 1.2em;
+}
+
+.article-prose pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.article-prose hr {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 2em 0;
+}
+
+.article-prose table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 1.2em;
+}
+
+.article-prose th,
+.article-prose td {
+  border: 1px solid var(--border-color);
+  padding: 7px 10px;
+  font-size: 0.92em;
+}
+
+.article-source {
+  margin: 30px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-color);
+  font-size: 12.5px;
+  color: var(--text-subtle);
+}
+
+.article-source a {
+  color: var(--primary-color);
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 720px) {
@@ -817,6 +1156,18 @@ html.dark-theme .book-list-icon {
 
   .book-list-progress {
     display: none;
+  }
+
+  .article-scroll {
+    padding: 22px 18px 56px;
+  }
+
+  .add-article {
+    flex-wrap: wrap;
+  }
+
+  .add-article-input {
+    flex-basis: 100%;
   }
 
   /* On small screens the contents pane floats over the page instead of

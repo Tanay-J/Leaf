@@ -65,6 +65,10 @@ export function loadArticles(): SavedArticle[] {
   }
 }
 
+export function getArticle(id: string): SavedArticle | null {
+  return loadArticles().find((a) => a.id === id) ?? null;
+}
+
 function persist(list: SavedArticle[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));

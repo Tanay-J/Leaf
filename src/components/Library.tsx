@@ -4,9 +4,11 @@ import {
   FileText,
   LayoutGrid,
   List,
+  Newspaper,
   Search,
 } from "lucide-react";
 import { BOOKS, type Book } from "../books";
+import { loadArticles } from "../articles";
 import { loadProgress, navigate, useLibraryView, type Theme } from "../lib";
 import ThemeButton from "./ThemeButton";
 
@@ -29,6 +31,10 @@ interface Props {
 export default function Library({ theme, onCycleTheme }: Props) {
   const [query, setQuery] = useState("");
   const { view, setView } = useLibraryView();
+  const unreadArticles = useMemo(
+    () => loadArticles().filter((a) => !a.readAt).length,
+    []
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -75,6 +81,15 @@ export default function Library({ theme, onCycleTheme }: Props) {
               <List size={15} />
             </button>
           </div>
+          <button
+            className="secondary-action"
+            onClick={() => navigate("#/articles")}
+            title="Your reading list"
+          >
+            <Newspaper size={15} />
+            Reading list
+            {unreadArticles > 0 && <span className="nav-badge">{unreadArticles}</span>}
+          </button>
           <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
         </div>
       </header>

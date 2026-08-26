@@ -11,13 +11,7 @@ import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { Book } from "../books";
 import { loadProgress, saveProgress } from "../lib";
-import {
-  loadDecryptedBook,
-  PassphraseRequiredError,
-  WrongPassphraseError,
-  setStoredPassphrase,
-} from "../bookCrypto";
-import PassphrasePrompt from "./PassphrasePrompt";
+import { loadBook } from "../bookLoader";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -47,22 +41,15 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
   );
   const [errorText, setErrorText] = useState("");
   const [outline, setOutline] = useState<OutlineEntry[]>([]);
-  const [needsPassphrase, setNeedsPassphrase] = useState(false);
-  const [wrongPassphrase, setWrongPassphrase] = useState(false);
-  const [unlockAttempt, setUnlockAttempt] = useState(0);
 
-  /* Load the document once per book: download the ciphertext, decrypt it
-     in the browser, hand the plain bytes to pdf.js. */
+  /* Load the document once per book: download the bytes and hand them to
+     pdf.js. */
   useEffect(() => {
-    if (needsPassphrase) return; // wait for the visitor to unlock
-
     let disposed = false;
     (async () => {
       try {
-        const data = await loadDecryptedBook(book.url);
+        const data = await loadBook(book.url);
         if (disposed) return;
-        setNeedsPassphrase(false);
-        setWrongPassphrase(false);
 
         const pdf = await pdfjsLib.getDocument({
           data: new Uint8Array(data),
@@ -124,15 +111,8 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
         }
       } catch (err) {
         if (disposed) return;
-        if (err instanceof PassphraseRequiredError) {
-          setNeedsPassphrase(true);
-        } else if (err instanceof WrongPassphraseError) {
-          setNeedsPassphrase(true);
-          setWrongPassphrase(true);
-        } else {
-          setStatus("error");
-          setErrorText(err instanceof Error ? err.message : String(err));
-        }
+        setStatus("error");
+        setErrorText(err instanceof Error ? err.message : String(err));
       }
     })();
     return () => {
@@ -142,15 +122,7 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
       pdfRef.current = null;
       setOutline([]);
     };
-  }, [book.url, needsPassphrase, unlockAttempt]);
-
-  /* Called by PassphrasePrompt once the visitor submits a passphrase. */
-  const handleUnlock = useCallback((pw: string) => {
-    setStoredPassphrase(pw);
-    setWrongPassphrase(false);
-    setNeedsPassphrase(false);
-    setUnlockAttempt((a) => a + 1);
-  }, []);
+  }, [book.url]);
 
   const clampPage = useCallback(
     (p: number) =>
@@ -302,14 +274,11 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
 
   return (
     <div className="format-reader">
-      {status === "loading" && !needsPassphrase && (
+      {status === "loading" && (
         <div className="pane-overlay">
           <Loader2 className="spin" size={26} />
           <span>Loading PDF…</span>
         </div>
-      )}
-      {needsPassphrase && (
-        <PassphrasePrompt wrong={wrongPassphrase} onSubmit={handleUnlock} />
       )}
       {status === "error" && (
         <div className="error-pane">

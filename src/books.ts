@@ -176,7 +176,7 @@ export const BOOKS: Book[] = [
     title: "Moby Dick",
     author: "Herman Melville",
     type: "epub",
-    url: "https://s3.amazonaws.com/moby-dick/",
+    url: "https://s3.amazonaws.com/moby-dick/moby-dick.epub",
   },
   {
     id: "tracemonkey-paper",

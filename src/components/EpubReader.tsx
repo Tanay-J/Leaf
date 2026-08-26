@@ -10,13 +10,7 @@ import ePub from "epubjs";
 import type { Book as EpubBook, Rendition } from "epubjs";
 import type { Book } from "../books";
 import { loadProgress, saveProgress, type Theme } from "../lib";
-import {
-  loadDecryptedBook,
-  PassphraseRequiredError,
-  WrongPassphraseError,
-  setStoredPassphrase,
-} from "../bookCrypto";
-import PassphrasePrompt from "./PassphrasePrompt";
+import { loadBook } from "../bookLoader";
 
 /* Font choices offered in the reader topbar. An empty stack keeps the
    book's own typography untouched. */
@@ -80,11 +74,8 @@ export default function EpubReader({
     "loading"
   );
   const [errorText, setErrorText] = useState("");
-  const [needsPassphrase, setNeedsPassphrase] = useState(false);
-  const [wrongPassphrase, setWrongPassphrase] = useState(false);
-  const [unlockAttempt, setUnlockAttempt] = useState(0);
 
-  /* Fetch the encrypted book, decrypt it, then create the rendition. */
+  /* Fetch the book bytes, then create the rendition. */
   useEffect(() => {
     const el = viewerRef.current;
     if (!el) return;
@@ -96,10 +87,8 @@ export default function EpubReader({
 
     (async () => {
       try {
-        const data = await loadDecryptedBook(book.url);
+        const data = await loadBook(book.url);
         if (disposed) return;
-        setNeedsPassphrase(false);
-        setWrongPassphrase(false);
 
         eb = ePub(data);
         rendition = eb.renderTo(el, {
@@ -157,15 +146,8 @@ export default function EpubReader({
         if (!disposed) setStatus("ready");
       } catch (err) {
         if (disposed) return;
-        if (err instanceof PassphraseRequiredError) {
-          setNeedsPassphrase(true);
-        } else if (err instanceof WrongPassphraseError) {
-          setNeedsPassphrase(true);
-          setWrongPassphrase(true);
-        } else {
-          setStatus("error");
-          setErrorText(err instanceof Error ? err.message : String(err));
-        }
+        setStatus("error");
+        setErrorText(err instanceof Error ? err.message : String(err));
       }
     })();
 
@@ -175,16 +157,7 @@ export default function EpubReader({
       rendition?.destroy();
       eb?.destroy();
     };
-  }, [book.id, book.url, unlockAttempt]);
-
-  /* Called by PassphrasePrompt once the visitor submits a passphrase. */
-  const handleUnlock = useCallback((pw: string) => {
-    setStoredPassphrase(pw);
-    setWrongPassphrase(false);
-    setNeedsPassphrase(false);
-    setStatus("loading");
-    setUnlockAttempt((a) => a + 1);
-  }, []);
+  }, [book.id, book.url]);
 
   /* Apply typography and the sepia page tint whenever they change. */
   useEffect(() => {
@@ -303,14 +276,11 @@ export default function EpubReader({
 
   return (
     <div className="format-reader">
-      {status === "loading" && !needsPassphrase && (
+      {status === "loading" && (
         <div className="pane-overlay">
           <Loader2 className="spin" size={26} />
           <span>Loading book…</span>
         </div>
-      )}
-      {needsPassphrase && (
-        <PassphrasePrompt wrong={wrongPassphrase} onSubmit={handleUnlock} />
       )}
       {status === "error" && (
         <div className="error-pane">

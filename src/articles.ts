@@ -1,6 +1,8 @@
 /**
  * Read-later article links, persisted per browser in localStorage
- * (same zero-backend philosophy as reading progress in lib.ts).
+ * (same zero-backend philosophy as reading progress in lib.ts). Also the
+ * source of truth that the optional GitHub-Gist cross-device sync
+ * (src/articleSync.ts) merges with.
  */
 export interface SavedArticle {
   id: string;
@@ -10,14 +12,30 @@ export interface SavedArticle {
   addedAt: number;
   /** Timestamp of last read; null while still unread. */
   readAt: number | null;
+  /** Last time any field changed; drives sync merge conflicts. */
+  updatedAt: number;
+  /** Tombstone for cross-device deletes; null while the row is live. */
+  removedAt: number | null;
 }
 
 const STORAGE_KEY = "leaf:articles";
+
+/** Fired by persist(); the sync engine listens to schedule a push. */
+export const ARTICLES_CHANGED_EVENT = "leaf:articles-changed";
 
 function makeId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Backfills fields added after migration so old rows stay merge-safe. */
+function normalize(a: SavedArticle): SavedArticle {
+  return {
+    ...a,
+    updatedAt: a.updatedAt ?? a.addedAt,
+    removedAt: a.removedAt ?? null,
+  };
 }
 
 /** Adds https:// when missing and validates the result. Throws on garbage. */
@@ -55,18 +73,29 @@ export function deriveTitle(url: string): string {
   }
 }
 
-export function loadArticles(): SavedArticle[] {
+function loadRawArticles(): SavedArticle[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const list = raw ? (JSON.parse(raw) as SavedArticle[]) : [];
-    return Array.isArray(list) ? list : [];
+    return Array.isArray(list) ? list.map(normalize) : [];
   } catch {
     return [];
   }
 }
 
+/** Live (non-deleted) articles, newest first — what the UI shows. */
+export function loadArticles(): SavedArticle[] {
+  return loadRawArticles().filter((a) => !a.removedAt);
+}
+
+/** Every row including tombstones — for sync merge only. */
+export function loadAllArticles(): SavedArticle[] {
+  return loadRawArticles();
+}
+
 export function getArticle(id: string): SavedArticle | null {
-  return loadArticles().find((a) => a.id === id) ?? null;
+  const found = loadRawArticles().find((a) => a.id === id);
+  return found && !found.removedAt ? found : null;
 }
 
 function persist(list: SavedArticle[]): void {
@@ -75,6 +104,16 @@ function persist(list: SavedArticle[]): void {
   } catch {
     /* storage unavailable */
   }
+  try {
+    window.dispatchEvent(new CustomEvent(ARTICLES_CHANGED_EVENT));
+  } catch {
+    /* SSR / storage unavailable */
+  }
+}
+
+/** Writes a full list, used by the sync engine after a remote merge. */
+export function replaceArticles(list: SavedArticle[]): void {
+  persist(list.map(normalize));
 }
 
 export function domainOf(url: string): string {
@@ -90,30 +129,53 @@ export function addArticle(
   rawUrl: string
 ): { article: SavedArticle; added: boolean } {
   const url = normalizeUrl(rawUrl);
-  const list = loadArticles();
-  const existing = list.find((a) => a.url === url);
+  const list = loadRawArticles();
+  const existing = list.find((a) => a.url === url && !a.removedAt);
   if (existing) return { article: existing, added: false };
 
+  const timestamp = Date.now();
   const article: SavedArticle = {
     id: makeId(),
     url,
     title: deriveTitle(url),
     domain: domainOf(url),
-    addedAt: Date.now(),
+    addedAt: timestamp,
     readAt: null,
+    updatedAt: timestamp,
+    removedAt: null,
   };
-  persist([article, ...list]);
+
+  // Re-saving a previously-deleted link revives it (replaces the tombstone).
+  const tombstone = list.find((a) => a.url === url && a.removedAt);
+  persist(
+    tombstone
+      ? list.map((a) => (a.url === url && a.removedAt ? article : a))
+      : [article, ...list]
+  );
   return { article, added: true };
 }
 
+/** Deletes by setting a tombstone so other synced devices honour the removal. */
 export function removeArticle(id: string): void {
-  persist(loadArticles().filter((a) => a.id !== id));
+  const now = Date.now();
+  persist(
+    loadRawArticles().map((a) =>
+      a.id === id ? { ...a, removedAt: now, updatedAt: now } : a
+    )
+  );
 }
 
 export function setArticleRead(id: string, read: boolean): void {
+  const now = Date.now();
   persist(
-    loadArticles().map((a) =>
-      a.id === id ? { ...a, readAt: read ? (a.readAt ?? Date.now()) : null } : a
+    loadRawArticles().map((a) =>
+      a.id === id
+        ? {
+            ...a,
+            readAt: read ? (a.readAt ?? now) : null,
+            updatedAt: now,
+          }
+        : a
     )
   );
 }
@@ -122,7 +184,10 @@ export function setArticleRead(id: string, read: boolean): void {
 export function updateArticleTitle(id: string, title: string): void {
   const clean = title.trim();
   if (!clean) return;
+  const now = Date.now();
   persist(
-    loadArticles().map((a) => (a.id === id ? { ...a, title: clean } : a))
+    loadRawArticles().map((a) =>
+      a.id === id ? { ...a, title: clean, updatedAt: now } : a
+    )
   );
 }

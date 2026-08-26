@@ -6,10 +6,17 @@ import Reader from "./components/Reader";
 import ArticlesList from "./components/ArticlesList";
 import ArticleReader from "./components/ArticleReader";
 import { addArticle, getArticle } from "./articles";
+import { initSync } from "./articleSync";
 
 export default function App() {
   const route = useHashRoute();
   const { theme, cycleTheme } = useTheme();
+
+  /* Start the read-later sync engine once: it listens for local article
+     mutations and pulls the remote gist once per session. */
+  useEffect(() => {
+    initSync();
+  }, []);
 
   /* Split the hash into its path and query parts:
      "#/article/<id>", "#/articles", "#/add?url=...". */

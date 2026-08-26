@@ -41,6 +41,25 @@ books.
 
 Articles stay in your browser, just like reading progress.
 
+### Sync across devices
+
+Your reading list can follow you across browsers and computers, synced through
+a private GitHub Gist.
+
+1. Create a **classic** personal access token with only the **`gist`** scope
+   (GitHub → Settings → Developer settings → Personal access tokens → Tokens
+   (classic)).
+2. On the Reading list page, paste the token into the **Sync across devices**
+   card and connect.
+3. Do the same on your other devices. The first device creates the gist; the
+   rest find it automatically from your account.
+
+- Your list syncs automatically after you add, read, or remove an article, and
+  on each visit. Use **Sync now** to force a refresh.
+- Reading state and titles sync too. Removing an article deletes it everywhere.
+- The token is stored in your browser only and can be revoked at any time.
+  Deleting the Gist stops sync but never touches your local copy.
+
 ## Appearance
 
 The theme button cycles **Light → Sepia → Dark**. Dark mode is easier on the

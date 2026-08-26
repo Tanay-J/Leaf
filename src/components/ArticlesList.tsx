@@ -1,11 +1,27 @@
-import { useState, type FormEvent } from "react";
-import { BookOpen, Link2, Newspaper, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import {
+  BookOpen,
+  Link2,
+  Loader2,
+  Newspaper,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Unplug,
+} from "lucide-react";
 import {
   addArticle,
   loadArticles,
   removeArticle,
   type SavedArticle,
 } from "../articles";
+import {
+  getSyncStatus,
+  syncConnect,
+  syncDisconnect,
+  syncNow,
+  type SyncStatus,
+} from "../articleSync";
 import { navigate, type Theme } from "../lib";
 import ThemeButton from "./ThemeButton";
 
@@ -40,6 +56,46 @@ export default function ArticlesList({
   const [error, setError] = useState(
     initialError ? "That doesn’t look like a valid link." : ""
   );
+
+  /* Cross-device sync UI state. */
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() =>
+    getSyncStatus()
+  );
+  const [token, setToken] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [connectError, setConnectError] = useState("");
+
+  useEffect(() => {
+    const onStatus = (e: Event) =>
+      setSyncStatus({ ...(e as CustomEvent<SyncStatus>).detail });
+    window.addEventListener("leaf:sync-status", onStatus);
+    return () => window.removeEventListener("leaf:sync-status", onStatus);
+  }, []);
+
+  const connect = async () => {
+    setSyncBusy(true);
+    setConnectError("");
+    const res = await syncConnect(token);
+    if (!res.ok) {
+      setConnectError(res.error);
+    } else {
+      setToken("");
+      setArticles(loadArticles());
+    }
+    setSyncBusy(false);
+  };
+
+  const manualSync = async () => {
+    setSyncBusy(true);
+    await syncNow();
+    setArticles(loadArticles());
+    setSyncBusy(false);
+  };
+
+  const disconnect = () => {
+    syncDisconnect();
+    setConnectError("");
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -154,6 +210,106 @@ export default function ArticlesList({
           </ul>
         )}
 
+        <div className="sync-card">
+          <div className="sync-card-head">
+            <span
+              className={`sync-dot sync-dot-${syncStatus.state}`}
+              aria-hidden
+            />
+            <strong>Sync across devices</strong>
+          </div>
+
+          {syncStatus.state === "disconnected" ? (
+            <>
+              <p className="sync-hint">
+                Share your reading list with every browser and device you use,
+                synced through a GitHub Gist.
+              </p>
+              <details className="sync-help">
+                <summary>How to get a token</summary>
+                <ol>
+                  <li>
+                    Create a{" "}
+                    <strong>GitHub classic personal access token</strong> with
+                    only the <code>gist</code> scope (GitHub → Settings →
+                    Developer settings → Personal access tokens → Tokens
+                    (classic)).
+                  </li>
+                  <li>
+                    Paste it below on each device. The first device creates the
+                    gist; the rest pick it up automatically.
+                  </li>
+                </ol>
+              </details>
+              <form
+                className="sync-connect"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void connect();
+                }}
+              >
+                <input
+                  type="password"
+                  className="sync-token-input"
+                  value={token}
+                  onChange={(e) => {
+                    setToken(e.target.value);
+                    if (connectError) setConnectError("");
+                  }}
+                  placeholder="GitHub token (gist scope)"
+                  aria-label="GitHub token"
+                />
+                <button
+                  className="add-article-btn"
+                  type="submit"
+                  disabled={syncBusy}
+                >
+                  {syncBusy ? (
+                    <Loader2 className="spin" size={15} />
+                  ) : (
+                    <Link2 size={15} />
+                  )}
+                  {syncBusy ? "Connecting…" : "Connect"}
+                </button>
+              </form>
+              {connectError && <p className="article-error">{connectError}</p>}
+            </>
+          ) : (
+            <>
+              <p className="sync-hint">
+                {syncStatus.state === "connecting"
+                  ? "Connecting…"
+                  : syncStatus.state === "syncing"
+                    ? "Syncing…"
+                    : syncStatus.state === "error"
+                      ? syncStatus.lastError ?? "Sync failed — will retry."
+                      : syncStatus.lastSyncedAt != null
+                        ? `Synced ${timeAgo(syncStatus.lastSyncedAt)}.`
+                        : "Connected."}
+              </p>
+              <div className="sync-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() => void manualSync()}
+                  disabled={syncBusy}
+                  title="Sync now"
+                >
+                  <RefreshCw size={15} />
+                  Sync now
+                </button>
+                <button
+                  className="secondary-action sync-disconnect"
+                  onClick={disconnect}
+                  title="Stop syncing"
+                >
+                  <Unplug size={15} />
+                  Disconnect
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="bookmarklet-section">
           <strong>Save pages from anywhere</strong>
           <p>
@@ -166,7 +322,10 @@ export default function ArticlesList({
           </a>
         </div>
 
-        <p className="footnote">Saved links live in this browser.</p>
+        <p className="footnote">
+          Saved links live in this browser. Turn on sync (below) to mirror them
+          across devices via a GitHub Gist.
+        </p>
       </main>
     </div>
   );

@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from "react";
-import { BOOKS } from "./books";
 import { useHashRoute, useTheme, navigate } from "./lib";
 import Library from "./components/Library";
 import Reader from "./components/Reader";
@@ -7,6 +6,7 @@ import ArticlesList from "./components/ArticlesList";
 import ArticleReader from "./components/ArticleReader";
 import { addArticle, getArticle } from "./articles";
 import { initSync } from "./articleSync";
+import { findBook } from "./userBooks";
 
 export default function App() {
   const route = useHashRoute();
@@ -42,7 +42,7 @@ export default function App() {
     const prefix = "#/book/";
     if (!parsed.path.startsWith(prefix)) return null;
     const id = decodeURIComponent(parsed.path.slice(prefix.length));
-    return BOOKS.find((b) => b.id === id) ?? null;
+    return findBook(id) ?? null;
   }, [parsed]);
 
   const articleId = useMemo(() => {

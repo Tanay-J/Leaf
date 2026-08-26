@@ -7,6 +7,10 @@ right where you left off — no accounts, no uploads, no sign-in.
 
 - **Find a book** — search by title or author, or switch between grid and
   list views.
+- **Add a book** — click **Add book**, paste a link to an EPUB or PDF file, and
+  it joins your library. Books you add are marked **Yours** and shown first on
+  the front page; you can remove them with the trash icon. They’re kept in
+  your browser, and open exactly like the built-in books.
 - **Open a book** — click any card to start reading.
 - **Resume reading** — every book remembers the page or chapter you were on,
   per browser.

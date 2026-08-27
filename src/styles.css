@@ -656,6 +656,75 @@ html.dark-theme .pdf-canvas {
   background: color-mix(in srgb, var(--bg-app) 70%, transparent);
 }
 
+/* Passphrase gate shown over the reader until the library is unlocked. */
+.passphrase-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+  padding: 22px;
+  background: var(--bg-card, var(--bg-app));
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  text-align: center;
+}
+
+.passphrase-gate strong {
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.passphrase-gate .gate-hint {
+  margin: 0;
+  color: var(--text-subtle);
+  font-weight: 500;
+}
+
+.passphrase-gate .gate-error {
+  margin: 0;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+html.dark-theme .passphrase-gate .gate-error {
+  color: #fca5a5;
+}
+
+.passphrase-gate input[type="password"] {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
+  background: var(--bg-input, #fff);
+  color: var(--text-fg);
+  font-size: 14px;
+}
+
+html.dark-theme .passphrase-gate input[type="password"] {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+.passphrase-gate button[type="submit"] {
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent, #2563eb);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.passphrase-gate button[type="submit"]:hover {
+  filter: brightness(1.05);
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }

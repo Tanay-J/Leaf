@@ -24,6 +24,12 @@ catalog that ships with Leaf.
 
 ## Reading
 
+The built-in catalog is **passphrase-protected**: books are deployed as
+encrypted files, and the reader asks for the library passphrase **once per
+session** when you first open any catalog book. Enter it and every book unlocks
+for that browser session. Your own device-added books are never encrypted —
+they never leave your browser.
+
 **EPUB**
 - Turn pages with the **Prev / Next** buttons or the **← / → arrow keys**.
 - Use the **Contents** panel to jump to any chapter.

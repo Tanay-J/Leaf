@@ -12,6 +12,12 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { Book } from "../books";
 import { loadProgress, saveProgress } from "../lib";
 import { loadBook } from "../bookLoader";
+import {
+  PassphraseRequiredError,
+  WrongPassphraseError,
+  setStoredPassphrase,
+} from "../bookCrypto";
+import PassphrasePrompt from "./PassphrasePrompt";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -40,6 +46,9 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
     "loading"
   );
   const [errorText, setErrorText] = useState("");
+  const [needsPassphrase, setNeedsPassphrase] = useState(false);
+  const [wrongPassphrase, setWrongPassphrase] = useState(false);
+  const [unlockAttempt, setUnlockAttempt] = useState(0);
   const [outline, setOutline] = useState<OutlineEntry[]>([]);
 
   /* Load the document once per book: download the bytes and hand them to
@@ -111,6 +120,16 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
         }
       } catch (err) {
         if (disposed) return;
+        if (err instanceof PassphraseRequiredError) {
+          setNeedsPassphrase(true);
+          setWrongPassphrase(false);
+          return;
+        }
+        if (err instanceof WrongPassphraseError) {
+          setNeedsPassphrase(true);
+          setWrongPassphrase(true);
+          return;
+        }
         setStatus("error");
         setErrorText(err instanceof Error ? err.message : String(err));
       }
@@ -122,7 +141,17 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
       pdfRef.current = null;
       setOutline([]);
     };
-  }, [book.url]);
+  }, [book.url, unlockAttempt]);
+
+  /* Called by PassphrasePrompt once the visitor submits a passphrase. */
+  const handleUnlock = (pw: string) => {
+    setStoredPassphrase(pw);
+    setNeedsPassphrase(false);
+    setWrongPassphrase(false);
+    setOutline([]);
+    setStatus("loading");
+    setUnlockAttempt((n) => n + 1);
+  };
 
   const clampPage = useCallback(
     (p: number) =>
@@ -274,11 +303,17 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
 
   return (
     <div className="format-reader">
-      {status === "loading" && (
+      {status === "loading" && !needsPassphrase && (
         <div className="pane-overlay">
           <Loader2 className="spin" size={26} />
           <span>Loading PDF…</span>
         </div>
+      )}
+      {needsPassphrase && (
+        <PassphrasePrompt
+          wrong={wrongPassphrase}
+          onSubmit={handleUnlock}
+        />
       )}
       {status === "error" && (
         <div className="error-pane">

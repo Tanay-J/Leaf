@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build": "tsc && vite build && node scripts/prune-plain-books.mjs",
+    "preview": "vite preview",
+    "encrypt-books": "node scripts/encrypt-books.mjs --in public/books --out public/books"
   },
   "dependencies": {
     "dompurify": "^3.4.14",

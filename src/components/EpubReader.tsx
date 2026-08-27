@@ -11,6 +11,12 @@ import type { Book as EpubBook, Rendition } from "epubjs";
 import type { Book } from "../books";
 import { loadProgress, saveProgress, type Theme } from "../lib";
 import { loadBook } from "../bookLoader";
+import {
+  PassphraseRequiredError,
+  WrongPassphraseError,
+  setStoredPassphrase,
+} from "../bookCrypto";
+import PassphrasePrompt from "./PassphrasePrompt";
 
 /* Font choices offered in the reader topbar. An empty stack keeps the
    book's own typography untouched. */
@@ -74,6 +80,9 @@ export default function EpubReader({
     "loading"
   );
   const [errorText, setErrorText] = useState("");
+  const [needsPassphrase, setNeedsPassphrase] = useState(false);
+  const [wrongPassphrase, setWrongPassphrase] = useState(false);
+  const [unlockAttempt, setUnlockAttempt] = useState(0);
 
   /* Fetch the book bytes, then create the rendition. */
   useEffect(() => {
@@ -146,6 +155,16 @@ export default function EpubReader({
         if (!disposed) setStatus("ready");
       } catch (err) {
         if (disposed) return;
+        if (err instanceof PassphraseRequiredError) {
+          setNeedsPassphrase(true);
+          setWrongPassphrase(false);
+          return;
+        }
+        if (err instanceof WrongPassphraseError) {
+          setNeedsPassphrase(true);
+          setWrongPassphrase(true);
+          return;
+        }
         setStatus("error");
         setErrorText(err instanceof Error ? err.message : String(err));
       }
@@ -157,7 +176,16 @@ export default function EpubReader({
       rendition?.destroy();
       eb?.destroy();
     };
-  }, [book.id, book.url]);
+  }, [book.id, book.url, unlockAttempt]);
+
+  /* Called by PassphrasePrompt once the visitor submits a passphrase. */
+  const handleUnlock = (pw: string) => {
+    setStoredPassphrase(pw);
+    setNeedsPassphrase(false);
+    setWrongPassphrase(false);
+    setStatus("loading");
+    setUnlockAttempt((n) => n + 1);
+  };
 
   /* Apply typography and the sepia page tint whenever they change. */
   useEffect(() => {
@@ -276,11 +304,17 @@ export default function EpubReader({
 
   return (
     <div className="format-reader">
-      {status === "loading" && (
+      {status === "loading" && !needsPassphrase && (
         <div className="pane-overlay">
           <Loader2 className="spin" size={26} />
           <span>Loading book…</span>
         </div>
+      )}
+      {needsPassphrase && (
+        <PassphrasePrompt
+          wrong={wrongPassphrase}
+          onSubmit={handleUnlock}
+        />
       )}
       {status === "error" && (
         <div className="error-pane">

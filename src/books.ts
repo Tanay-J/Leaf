@@ -3,12 +3,11 @@
 //   title: shown on the library card and reader header
 //   author:(optional) shown under the title
 //   type:  "epub" or "pdf"
-//   url:   direct link to the file. Must allow cross-origin reads —
-//          GitHub Pages and raw.githubusercontent.com both work.
-//
-// Examples:
-//   https://<user>.github.io/<repo>/alice.epub
-//   https://raw.githubusercontent.com/<user>/<repo>/main/alice.epub
+//   url:   relative path to the book file under /books (no scheme/host).
+//          Books are served ONLY as ciphertext: a `books/<id>.epub.enc`
+//          produced by CI from the private vault (see scripts/encrypt-books.mjs
+//          and .github/workflows/deploy.yml). The reader fetches `<url>.enc`
+//          and decrypts in the browser with the library passphrase.
 
 export interface Book {
   id: string;
@@ -168,21 +167,5 @@ export const BOOKS: Book[] = [
     title: "Pinaka",
     type: "epub",
     url: "books/pinaka.epub",
-  },
-
-  // ---- Remote samples ----
-  {
-    id: "moby-dick",
-    title: "Moby Dick",
-    author: "Herman Melville",
-    type: "epub",
-    url: "https://s3.amazonaws.com/moby-dick/moby-dick.epub",
-  },
-  {
-    id: "tracemonkey-paper",
-    title: "Trace-based JIT Type Specialization (sample PDF)",
-    author: "Mozilla pdf.js demo file",
-    type: "pdf",
-    url: "https://raw.githubusercontent.com/mozilla/pdf.js/master/web/compressed.tracemonkey-pldi-09.pdf",
   },
 ];

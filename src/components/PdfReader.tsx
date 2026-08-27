@@ -48,7 +48,7 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
     let disposed = false;
     (async () => {
       try {
-        const data = await loadBook(book.url);
+        const data = await loadBook(book);
         if (disposed) return;
 
         const pdf = await pdfjsLib.getDocument({

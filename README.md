@@ -12,8 +12,10 @@ catalog that ships with Leaf.
 - **Browse** — every book from the built-in catalog lives here. Click **+** on
   a card to pin it to your library, or ✓ again to unpin; you can open and read
   anything without adding it first.
-- **Add a book** — click **Add book**, paste a link to an EPUB or PDF file
-  hosted anywhere, and it joins your library alongside pinned books.
+- **Add a book** — click **Add book** and either paste a link to an EPUB/PDF
+  hosted anywhere, or choose a file from this device. Device files are stored
+  in your browser (IndexedDB) and never uploaded; removing the book deletes
+  its stored copy.
 - **Find a book** — search by title or author (scoped to whichever tab you're
   on), or switch between grid and list views.
 - **Open a book** — click any card to start reading.

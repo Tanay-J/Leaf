@@ -87,7 +87,7 @@ export default function EpubReader({
 
     (async () => {
       try {
-        const data = await loadBook(book.url);
+        const data = await loadBook(book);
         if (disposed) return;
 
         eb = ePub(data);

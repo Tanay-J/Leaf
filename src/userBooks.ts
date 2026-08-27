@@ -8,10 +8,14 @@
  * fetched at runtime by URL (same as static books).
  */
 import { BOOKS, type Book } from "./books";
+import { saveBookBlob, deleteBookBlob } from "./localBooks";
 
 export interface UserBook extends Book {
   /** When this book was added to "my library". */
   addedAt: number;
+  /** Set for books added from the user's device: key of the file blob in
+   * IndexedDB (src/localBooks.ts). These books have no usable `url`. */
+  blobKey?: string;
 }
 
 export type BookType = "epub" | "pdf";
@@ -150,7 +154,65 @@ export function pinBook(book: Book): { book: UserBook; added: boolean } {
 }
 
 export function removeUserBook(id: string): void {
+  const entry = readAll().find((b) => b.id === id);
+  if (entry?.blobKey) {
+    // Fire-and-forget: the list entry disappears immediately; the blob
+    // (potentially many MB) is reaped in the background.
+    deleteBookBlob(entry.blobKey).catch(() => {
+      /* storage already gone / private mode — nothing to do */
+    });
+  }
   persist(readAll().filter((b) => b.id !== id));
+}
+
+/** "My Novel.epub" -> "My Novel" */
+export function titleFromFileName(name: string): string {
+  const base = name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+  return base || name;
+}
+
+function typeFromFileName(name: string): BookType | null {
+  if (/\.epub$/i.test(name)) return "epub";
+  if (/\.pdf$/i.test(name)) return "pdf";
+  return null;
+}
+
+/**
+ * Adds a book picked from the user's device: the file is stored as a Blob in
+ * IndexedDB and referenced from the library entry via `blobKey`. The file
+ * never leaves the browser.
+ */
+export async function addLocalBook(file: File): Promise<{
+  book: UserBook;
+  added: boolean;
+}> {
+  const type = typeFromFileName(file.name);
+  if (!type) {
+    throw new Error("Only .epub and .pdf files can be added.");
+  }
+  const list = readAll();
+  const title = titleFromFileName(file.name);
+  const id = makeId(new Set(list.map((b) => b.id)), file.name, title);
+  const blobKey = `file:${id}`;
+
+  await saveBookBlob(blobKey, file);
+  // Ask the browser to keep this data across storage pressure — best effort.
+  try {
+    void navigator.storage?.persist?.();
+  } catch {
+    /* unsupported — fine */
+  }
+
+  const book: UserBook = {
+    id,
+    title,
+    type,
+    url: "",
+    blobKey,
+    addedAt: Date.now(),
+  };
+  persist([book, ...list]);
+  return { book, added: true };
 }
 
 /** Every resolvable book — my library first, then the static catalog. */

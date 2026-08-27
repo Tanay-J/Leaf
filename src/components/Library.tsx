@@ -1,9 +1,17 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 import {
   BookOpen,
   Check,
   Compass,
   FileText,
+  FolderOpen,
   LayoutGrid,
   List,
   Newspaper,
@@ -21,6 +29,7 @@ import {
   deriveBookTitle,
   detectBookType,
   getMyLibrary,
+  addLocalBook,
   pinBook,
   removeUserBook,
   USER_BOOKS_CHANGED_EVENT,
@@ -80,6 +89,30 @@ export default function Library({ theme, onCycleTheme }: Props) {
   const [addAuthor, setAddAuthor] = useState("");
   const [addType, setAddType] = useState<BookType>("epub");
   const [addError, setAddError] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file later
+    if (!file) return;
+    setAddError("");
+    setAddBusy(true);
+    addLocalBook(file)
+      .then(() => {
+        setAddUrl("");
+        setAddTitle("");
+        setAddAuthor("");
+        setAddType("epub");
+        setShowAdd(false);
+      })
+      .catch((err) => {
+        setAddError(
+          err instanceof Error ? err.message : "Could not add that file."
+        );
+      })
+      .finally(() => setAddBusy(false));
+  };
 
   const onUrlChange = (v: string) => {
     setAddUrl(v);
@@ -475,6 +508,28 @@ return (
               />
             </label>
 
+            <div className="modal-divider">
+              <span>or</span>
+            </div>
+
+            <label className="modal-file-btn">
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".epub,.pdf"
+                onChange={onFilePicked}
+                disabled={addBusy}
+              />
+              <FolderOpen size={16} />
+              {addBusy
+                ? "Saving to this browser…"
+                : "Choose an EPUB or PDF from this device"}
+            </label>
+            <p className="modal-hint">
+              Files you pick are stored in this browser only — nothing is
+              uploaded.
+            </p>
+
             {addError && <p className="article-error">{addError}</p>}
 
             <div className="modal-actions">
@@ -485,7 +540,11 @@ return (
               >
                 Cancel
               </button>
-              <button type="submit" className="add-article-btn">
+              <button
+                type="submit"
+                className="add-article-btn"
+                disabled={addBusy}
+              >
                 <Plus size={15} />
                 Add to library
               </button>

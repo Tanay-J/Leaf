@@ -5,15 +5,20 @@ right where you left off — no accounts, no uploads, no sign-in.
 
 ## Your library
 
-- **Find a book** — search by title or author, or switch between grid and
-  list views.
-- **Add a book** — click **Add book**, paste a link to an EPUB or PDF file, and
-  it joins your library. Books you add are marked **Yours** and shown first on
-  the front page; you can remove them with the trash icon. They’re kept in
-  your browser, and open exactly like the built-in books.
+The front page is **your** shelf — only the books you've collected. Use the
+**My library / Browse** control to move between your shelf and the built-in
+catalog that ships with Leaf.
+
+- **Browse** — every book from the built-in catalog lives here. Click **+** on
+  a card to pin it to your library, or ✓ again to unpin; you can open and read
+  anything without adding it first.
+- **Add a book** — click **Add book**, paste a link to an EPUB or PDF file
+  hosted anywhere, and it joins your library alongside pinned books.
+- **Find a book** — search by title or author (scoped to whichever tab you're
+  on), or switch between grid and list views.
 - **Open a book** — click any card to start reading.
 - **Resume reading** — every book remembers the page or chapter you were on,
-  per browser.
+  per browser. Pinning and unpinning never loses your place.
 
 ## Reading
 

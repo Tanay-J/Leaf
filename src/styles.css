@@ -828,7 +828,8 @@ html.dark-theme .book-list-icon {
   flex-shrink: 0;
 }
 
-.card-remove {
+.card-remove,
+.card-add {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -843,18 +844,42 @@ html.dark-theme .book-list-icon {
   color: var(--text-subtle);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .book-card-wrap:hover .card-remove,
 .book-list-row-wrap:hover .card-remove,
-.card-remove:focus-visible {
+.card-remove:focus-visible,
+.card-add,
+.card-add:focus-visible {
   opacity: 1;
 }
 
 .card-remove:hover {
   color: #dc2626;
   border-color: #dc2626;
+}
+
+/* Browse tab: pin / unpin membership toggle on each card or row. */
+.card-add {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.card-add:hover {
+  background: var(--primary-bg);
+}
+
+.card-add.added {
+  color: #047857;
+  border-color: #047857;
+}
+
+.card-add.added:hover {
+  color: #dc2626;
+  border-color: #dc2626;
+  background: none;
 }
 
 /* ---------- Add-book modal ---------- */
@@ -1397,6 +1422,67 @@ html.dark-theme .brand-mark-articles {
 
 .article-source a {
   color: var(--primary-color);
+}
+
+/* ---------- Library scope tabs (My library / Browse) ---------- */
+
+.library-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin-bottom: 20px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+
+.tab-btn {
+  height: 30px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-subtle);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: var(--primary-color);
+}
+
+.tab-btn.active {
+  background: var(--primary-bg);
+  color: var(--primary-color);
+}
+
+.tab-count {
+  align-self: center;
+  min-width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--border-color-light);
+  border-radius: 999px;
+  background: var(--tag-bg);
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.empty-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 /* ---------- Responsive ---------- */

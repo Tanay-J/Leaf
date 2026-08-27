@@ -1,8 +1,11 @@
 /**
- * User-added books, persisted per browser in localStorage. These are layered
- * in front of the static `src/books.ts` catalog: they're "my library" and are
- * shown first on the front page. Only the book's metadata lives here — the
- * file itself is still fetched at runtime by URL (same as static books).
+ * "My library", persisted per browser in localStorage. Two kinds of entries:
+ *   - books pinned from the static `src/books.ts` catalog (reusing the built-in
+ *     id, so reading progress and #/book routes keep working), and
+ *   - external EPUB/PDF links added by URL ("Add book").
+ * The My library tab renders this list; the Browse tab renders the catalog
+ * with pin/unpin toggles. Only metadata lives here — the file itself is
+ * fetched at runtime by URL (same as static books).
  */
 import { BOOKS, type Book } from "./books";
 
@@ -31,18 +34,19 @@ function readAll(): UserBook[] {
 function persist(list: UserBook[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    /* storage unavailable */
-  }
-  try {
     window.dispatchEvent(new CustomEvent(USER_BOOKS_CHANGED_EVENT));
   } catch {
-    /* SSR / unavailable */
+    /* storage unavailable */
   }
 }
 
 export function loadUserBooks(): UserBook[] {
   return readAll();
+}
+
+/** My library only — URL books plus pinned catalog books, newest first. */
+export function getMyLibrary(): UserBook[] {
+  return [...readAll()].sort((a, b) => b.addedAt - a.addedAt);
 }
 
 function slugify(s: string): string {
@@ -132,11 +136,24 @@ export function addUserBook(input: {
   return { book, added: true };
 }
 
+/**
+ * Pins a book from the static catalog into "my library". Reuses the built-in
+ * id so reading progress, routes, and dedupe all keep working. Dedupes by id.
+ */
+export function pinBook(book: Book): { book: UserBook; added: boolean } {
+  const list = readAll();
+  const existing = list.find((b) => b.id === book.id);
+  if (existing) return { book: existing, added: false };
+  const entry: UserBook = { ...book, addedAt: Date.now() };
+  persist([entry, ...list]);
+  return { book: entry, added: true };
+}
+
 export function removeUserBook(id: string): void {
   persist(readAll().filter((b) => b.id !== id));
 }
 
-/** Combined library: user books first, then the static src/books.ts ones. */
+/** Every resolvable book — my library first, then the static catalog. */
 export function getAllBooks(): Book[] {
   return [...readAll(), ...BOOKS];
 }

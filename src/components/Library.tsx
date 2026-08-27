@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   BookOpen,
+  Check,
+  Compass,
   FileText,
   LayoutGrid,
   List,
@@ -18,8 +20,8 @@ import {
   addUserBook,
   deriveBookTitle,
   detectBookType,
-  getAllBooks,
-  loadUserBooks,
+  getMyLibrary,
+  pinBook,
   removeUserBook,
   USER_BOOKS_CHANGED_EVENT,
   type BookType,
@@ -44,26 +46,32 @@ interface Props {
 export default function Library({ theme, onCycleTheme }: Props) {
   const [query, setQuery] = useState("");
   const { view, setView } = useLibraryView();
-  const [books, setBooks] = useState<Book[]>(() => getAllBooks());
+  /* Which collection is on screen: your picks or the built-in catalog. */
+  const [tab, setTab] = useState<"mine" | "browse">("mine");
+  const [books, setBooks] = useState<Book[]>(() => getMyLibrary());
   const unreadArticles = useMemo(
     () => loadArticles().filter((a) => !a.readAt).length,
     []
   );
 
-  /* Refresh the combined library (user books in front) whenever it changes. */
+  /* Refresh my library whenever anything is pinned, unpinned, or added. */
   useEffect(() => {
-    const onBooks = () => setBooks(getAllBooks());
+    const onBooks = () => setBooks(getMyLibrary());
     window.addEventListener(USER_BOOKS_CHANGED_EVENT, onBooks);
     return () => window.removeEventListener(USER_BOOKS_CHANGED_EVENT, onBooks);
   }, []);
 
+  /* Browse renders the static src/books.ts catalog directly. */
+  const source = tab === "mine" ? books : BOOKS;
+  const mineIds = useMemo(() => new Set(books.map((b) => b.id)), [books]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return books;
-    return books.filter((b) =>
+    if (!q) return source;
+    return source.filter((b) =>
       `${b.title} ${b.author ?? ""}`.toLowerCase().includes(q)
     );
-  }, [query, books]);
+  }, [query, source]);
 
   /* ---- "Add book" modal state ---- */
   const [showAdd, setShowAdd] = useState(false);
@@ -110,8 +118,15 @@ export default function Library({ theme, onCycleTheme }: Props) {
     }
   };
 
+  /** Mine-tab trash: unpins catalog books, deletes URL-added ones. */
   const remove = (id: string) => {
     removeUserBook(id);
+  };
+
+  /** Browse-tab toggle: pin a catalog book, unpin when it's already yours. */
+  const togglePin = (book: Book) => {
+    if (mineIds.has(book.id)) removeUserBook(book.id);
+    else pinBook(book);
   };
 
 return (
@@ -132,7 +147,7 @@ return (
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search your books…"
+              placeholder={tab === "mine" ? "Search your books…" : "Search the catalog…"}
             />
           </div>
           <div className="view-toggle" role="group" aria-label="View mode">
@@ -175,20 +190,64 @@ return (
       </header>
 
       <main className="content">
+        <div className="library-tabs" role="tablist" aria-label="Choose which collection is shown">
+          <button
+            role="tab"
+            aria-selected={tab === "mine"}
+            className={`tab-btn${tab === "mine" ? " active" : ""}`}
+            onClick={() => setTab("mine")}
+            title="Books you've collected"
+          >
+            <BookOpen size={14} />
+            My library
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === "browse"}
+            className={`tab-btn${tab === "browse" ? " active" : ""}`}
+            onClick={() => setTab("browse")}
+            title="The built-in catalog shipped with Leaf"
+          >
+            <Compass size={14} />
+            Browse
+          </button>
+          <span className="tab-count">{filtered.length}</span>
+        </div>
+
         {filtered.length === 0 ? (
           <div className="empty-state">
             <BookOpen size={28} />
             <p>
-              {books.length === 0
-                ? "No books yet — click “Add book” to start your library."
-                : "No books match your search."}
+              {query.trim() !== ""
+                ? "No books match your search."
+                : tab === "mine"
+                  ? "Your library is empty — pin books from the catalog or add one by link."
+                  : "No books match your search."}
             </p>
+            {tab === "mine" && query.trim() === "" && (
+              <div className="empty-actions">
+                <button
+                  className="add-article-btn"
+                  onClick={() => setTab("browse")}
+                >
+                  <Compass size={15} />
+                  Browse main library
+                </button>
+                <button
+                  className="secondary-action"
+                  onClick={() => setShowAdd(true)}
+                >
+                  <Plus size={15} />
+                  Add book link
+                </button>
+              </div>
+            )}
           </div>
         ) : view === "grid" ? (
           <div className="book-grid">
             {filtered.map((b) => {
               const prog = progressInfo(b);
-              const isMine = mine(b.id);
+              const isMine = mineIds.has(b.id);
               return (
                 <div className="book-card-wrap" key={b.id}>
                   <button
@@ -225,14 +284,34 @@ return (
                       )}
                     </div>
                   </button>
-                  {isMine && (
+                  {tab === "mine" ? (
+                    isMine && (
+                      <button
+                        className="card-remove"
+                        onClick={() => remove(b.id)}
+                        title="Remove from your library"
+                        aria-label={`Remove ${b.title}`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )
+                  ) : (
                     <button
-                      className="card-remove"
-                      onClick={() => remove(b.id)}
-                      title="Remove from your library"
-                      aria-label={`Remove ${b.title}`}
+                      className={`card-add${isMine ? " added" : ""}`}
+                      onClick={() => togglePin(b)}
+                      title={
+                        isMine
+                          ? "Remove from your library"
+                          : "Add to your library"
+                      }
+                      aria-label={
+                        (isMine ? "Remove " : "Add ") +
+                        b.title +
+                        (isMine ? " from" : " to") +
+                        " your library"
+                      }
                     >
-                      <Trash2 size={14} />
+                      {isMine ? <Check size={15} /> : <Plus size={15} />}
                     </button>
                   )}
                 </div>
@@ -243,7 +322,7 @@ return (
 <div className="book-list">
             {filtered.map((b) => {
               const prog = progressInfo(b);
-              const isMine = mine(b.id);
+              const isMine = mineIds.has(b.id);
               return (
                 <div className="book-list-row-wrap" key={b.id}>
                   <button
@@ -271,14 +350,34 @@ return (
                     <span className={`pill pill-${b.type}`}>{b.type}</span>
                     {isMine && <span className="book-list-yours">Yours</span>}
                   </button>
-                  {isMine && (
+                  {tab === "mine" ? (
+                    isMine && (
+                      <button
+                        className="card-remove"
+                        onClick={() => remove(b.id)}
+                        title="Remove from your library"
+                        aria-label={`Remove ${b.title}`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )
+                  ) : (
                     <button
-                      className="card-remove"
-                      onClick={() => remove(b.id)}
-                      title="Remove from your library"
-                      aria-label={`Remove ${b.title}`}
+                      className={`card-add${isMine ? " added" : ""}`}
+                      onClick={() => togglePin(b)}
+                      title={
+                        isMine
+                          ? "Remove from your library"
+                          : "Add to your library"
+                      }
+                      aria-label={
+                        (isMine ? "Remove " : "Add ") +
+                        b.title +
+                        (isMine ? " from" : " to") +
+                        " your library"
+                      }
                     >
-                      <Trash2 size={14} />
+                      {isMine ? <Check size={15} /> : <Plus size={15} />}
                     </button>
                   )}
                 </div>
@@ -287,9 +386,9 @@ return (
           </div>
         )}
         <p className="footnote">
-          {BOOKS.length > 0
-            ? "Books marked “Yours” are the ones you added and stay in this browser. The rest are the demo library."
-            : "Your library is empty — click “Add book” to start it."}
+          {tab === "mine"
+            ? "Your picks are kept in this browser. Open Browse to pull more in from the built-in catalog."
+            : "The catalog shipped with Leaf — “Yours” marks what you’ve collected. Click the toggle on any card to add or remove it."}
         </p>
       </main>
 
@@ -385,4 +484,3 @@ return (
     </div>
   );
 }
-  const mine = (id: string) => loadUserBooks().some((b) => b.id === id);

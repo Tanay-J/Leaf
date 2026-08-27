@@ -213,6 +213,12 @@ html.dark-theme .brand-mark {
 }
 
 .book-card {
+  /* <button> shrinks to fit its content even as a flex/block box — fill the
+     grid track explicitly. Chrome's UA sheet also forces align-items:
+     flex-start on buttons, which would stop the cover/body from stretching —
+     make the stretch explicit. */
+  width: 100%;
+  align-items: stretch;
   text-align: left;
   border: 1px solid var(--border-color);
   border-radius: 12px;
@@ -727,6 +733,8 @@ html.dark-theme .error-pane {
 }
 
 .book-list-row {
+  /* Same button shrink-to-fit quirk as .book-card — fill the row wrap. */
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -880,6 +888,12 @@ html.dark-theme .book-list-icon {
   color: #dc2626;
   border-color: #dc2626;
   background: none;
+}
+
+/* On Browse cards the persistent +/✓ toggle occupies the top-right corner —
+   slide the type pill left of it instead of overlapping. */
+.pill-tucked {
+  right: 48px;
 }
 
 /* ---------- Add-book modal ---------- */

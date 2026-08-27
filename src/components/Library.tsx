@@ -262,7 +262,13 @@ return (
                       ) : (
                         <FileText size={34} />
                       )}
-                      <span className={`pill pill-${b.type}`}>{b.type}</span>
+                      <span
+                        className={`pill pill-${b.type}${
+                          tab === "browse" ? " pill-tucked" : ""
+                        }`}
+                      >
+                        {b.type}
+                      </span>
                       {isMine && (
                         <span className="pill pill-yours">Yours</span>
                       )}
@@ -347,7 +353,13 @@ return (
                     {prog.label && (
                       <span className="book-list-progress">{prog.label}</span>
                     )}
-                    <span className={`pill pill-${b.type}`}>{b.type}</span>
+                    <span
+                      className={`pill pill-${b.type}${
+                        tab === "browse" ? " pill-tucked" : ""
+                      }`}
+                    >
+                      {b.type}
+                    </span>
                     {isMine && <span className="book-list-yours">Yours</span>}
                   </button>
                   {tab === "mine" ? (

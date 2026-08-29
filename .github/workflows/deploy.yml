@@ -3,19 +3,10 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Book sync is manual: after uploading new epubs/PDFs to the private
+  # vault, run this workflow from the Actions tab ("Run workflow") to
+  # re-encrypt the vault and publish the updated catalog.
   workflow_dispatch:
-  # The content vault is a separate private repo, so its pushes can't start
-  # this workflow by themselves. It can ping this repo after an upload:
-  #   curl -X POST \
-  #     -H "Authorization: Bearer <PAT with repo scope>" \
-  #     -H "Accept: application/vnd.github+json" \
-  #     https://api.github.com/repos/Tanay-J/Leaf/dispatches \
-  #     -d '{"event_type":"books-updated"}'
-  repository_dispatch:
-    types: [books-updated]
-  # Safety net: sync the vault even when nothing is wired up.
-  schedule:
-    - cron: "37 5 * * *"
 
 permissions:
   contents: read

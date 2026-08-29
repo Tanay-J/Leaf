@@ -31,9 +31,9 @@ time — book files live only there, never in this repo.
 2. Optionally add display metadata to the vault's `books.json`
    (`"my-new-book.epub": { "title": "My New Book", "author": "A. Writer" }`).
    Without it, the title is derived from the filename.
-3. Deploy: the site redeploys **daily** and whenever the vault posts a
-   `repository_dispatch` (`books-updated`) event — or run **Deploy to GitHub
-   Pages** manually from the Actions tab.
+3. Deploy manually: open the **Actions** tab in this repo, pick
+   **Deploy to GitHub Pages**, and click **Run workflow**. Nothing runs on a
+   schedule — books only go live when you trigger a deploy.
 
 New books then show up under **Browse** automatically; pin them to your
 shelf with **+**.

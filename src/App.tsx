@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useHashRoute, useTheme, navigate } from "./lib";
 import Library from "./components/Library";
 import Reader from "./components/Reader";
@@ -7,6 +7,7 @@ import ArticleReader from "./components/ArticleReader";
 import { addArticle, getArticle } from "./articles";
 import { initSync } from "./articleSync";
 import { findBook } from "./userBooks";
+import { loadCatalog } from "./books";
 
 export default function App() {
   const route = useHashRoute();
@@ -16,6 +17,19 @@ export default function App() {
      mutations and pulls the remote gist once per session. */
   useEffect(() => {
     initSync();
+  }, []);
+
+  /* Load the vault-published catalog (books/catalog.json); the tick makes
+     deep links like #/book/<new-book> resolve once it has arrived. */
+  const [catalogTick, setCatalogTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    loadCatalog().then(() => {
+      if (alive) setCatalogTick((t) => t + 1);
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   /* Split the hash into its path and query parts:
@@ -43,7 +57,7 @@ export default function App() {
     if (!parsed.path.startsWith(prefix)) return null;
     const id = decodeURIComponent(parsed.path.slice(prefix.length));
     return findBook(id) ?? null;
-  }, [parsed]);
+  }, [parsed, catalogTick]);
 
   const articleId = useMemo(() => {
     const prefix = "#/article/";

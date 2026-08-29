@@ -22,6 +22,22 @@ catalog that ships with Leaf.
 - **Resume reading** — every book remembers the page or chapter you were on,
   per browser. Pinning and unpinning never loses your place.
 
+## Adding books to the site
+
+The Browse catalog is generated from the private content vault at deploy
+time — book files live only there, never in this repo.
+
+1. Drop the `.epub`/`.pdf` into the vault repo.
+2. Optionally add display metadata to the vault's `books.json`
+   (`"my-new-book.epub": { "title": "My New Book", "author": "A. Writer" }`).
+   Without it, the title is derived from the filename.
+3. Deploy: the site redeploys **daily** and whenever the vault posts a
+   `repository_dispatch` (`books-updated`) event — or run **Deploy to GitHub
+   Pages** manually from the Actions tab.
+
+New books then show up under **Browse** automatically; pin them to your
+shelf with **+**.
+
 ## Reading
 
 The built-in catalog is **passphrase-protected**: books are deployed as

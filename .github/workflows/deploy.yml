@@ -4,6 +4,18 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # The content vault is a separate private repo, so its pushes can't start
+  # this workflow by themselves. It can ping this repo after an upload:
+  #   curl -X POST \
+  #     -H "Authorization: Bearer <PAT with repo scope>" \
+  #     -H "Accept: application/vnd.github+json" \
+  #     https://api.github.com/repos/Tanay-J/Leaf/dispatches \
+  #     -d '{"event_type":"books-updated"}'
+  repository_dispatch:
+    types: [books-updated]
+  # Safety net: sync the vault even when nothing is wired up.
+  schedule:
+    - cron: "37 5 * * *"
 
 permissions:
   contents: read
@@ -55,7 +67,7 @@ jobs:
           # Fails the deploy when BOOKS_PASSPHRASE is unset — by design:
           # plaintext must never be published.
           node scripts/encrypt-books.mjs --in content-source --out dist/books
-          echo "Published $(ls dist/books/*.enc | wc -l | tr -d ' ') encrypted file(s)"
+          echo "Published $(ls dist/books/*.enc | wc -l | tr -d ' ') encrypted file(s) + catalog.json"
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

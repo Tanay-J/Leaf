@@ -13,7 +13,8 @@ try {
   const files = await readdir(dir);
   let removed = 0;
   for (const f of files) {
-    if (!f.endsWith(".enc")) {
+    // catalog.json is the generated manifest the app fetches — keep it.
+    if (!f.endsWith(".enc") && f !== "catalog.json") {
       await unlink(path.join(dir, f));
       removed++;
     }

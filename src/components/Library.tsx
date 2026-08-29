@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { BOOKS, type Book } from "../books";
+import { getCatalog, loadCatalog, type Book } from "../books";
 import { loadArticles } from "../articles";
 import { loadProgress, navigate, useLibraryView, type Theme } from "../lib";
 import ThemeButton from "./ThemeButton";
@@ -58,6 +58,8 @@ export default function Library({ theme, onCycleTheme }: Props) {
   /* Which collection is on screen: your picks or the built-in catalog. */
   const [tab, setTab] = useState<"mine" | "browse">("mine");
   const [books, setBooks] = useState<Book[]>(() => getMyLibrary());
+  /* Browse shelf: the CI-published catalog (static list until it loads). */
+  const [catalog, setCatalog] = useState<Book[]>(getCatalog);
   const unreadArticles = useMemo(
     () => loadArticles().filter((a) => !a.readAt).length,
     []
@@ -70,8 +72,20 @@ export default function Library({ theme, onCycleTheme }: Props) {
     return () => window.removeEventListener(USER_BOOKS_CHANGED_EVENT, onBooks);
   }, []);
 
-  /* Browse renders the static src/books.ts catalog directly. */
-  const source = tab === "mine" ? books : BOOKS;
+  /* Pick up the vault-published catalog once it arrives. */
+  useEffect(() => {
+    let alive = true;
+    loadCatalog().then((list) => {
+      if (alive) setCatalog(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /* Browse renders the vault-published catalog, falling back to the static
+     src/books.ts list until books/catalog.json is available. */
+  const source = tab === "mine" ? books : catalog;
   const mineIds = useMemo(() => new Set(books.map((b) => b.id)), [books]);
 
   const filtered = useMemo(() => {

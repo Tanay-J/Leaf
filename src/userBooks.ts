@@ -7,7 +7,7 @@
  * with pin/unpin toggles. Only metadata lives here — the file itself is
  * fetched at runtime by URL (same as static books).
  */
-import { BOOKS, type Book } from "./books";
+import { getCatalog, type Book } from "./books";
 import { saveBookBlob, deleteBookBlob } from "./localBooks";
 
 export interface UserBook extends Book {
@@ -215,9 +215,10 @@ export async function addLocalBook(file: File): Promise<{
   return { book, added: true };
 }
 
-/** Every resolvable book — my library first, then the static catalog. */
+/** Every resolvable book — my library first, then the published catalog
+ *  (static fallback until books/catalog.json has loaded). */
 export function getAllBooks(): Book[] {
-  return [...readAll(), ...BOOKS];
+  return [...readAll(), ...getCatalog()];
 }
 
 export function isUserBook(id: string): boolean {

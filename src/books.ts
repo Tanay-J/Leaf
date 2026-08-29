@@ -169,3 +169,56 @@ export const BOOKS: Book[] = [
     url: "books/pinaka.epub",
   },
 ];
+
+/* ---------- Published catalog (auto-synced from the private vault) ----------
+   CI encrypts the vault and writes books/catalog.json next to the .enc files
+   (see scripts/encrypt-books.mjs). The Browse shelf renders that manifest so
+   new vault books appear without editing this file. The static list above is
+   only the offline/dev fallback used until (and if) the manifest loads. */
+
+let catalogCache: Book[] | null = null;
+
+/** The catalog to render right now: the published manifest once loaded,
+ *  otherwise the static list above. */
+export function getCatalog(): Book[] {
+  return catalogCache ?? BOOKS;
+}
+
+/** Fetches books/catalog.json once per session and caches the result. */
+export async function loadCatalog(): Promise<Book[]> {
+  if (catalogCache) return catalogCache;
+  try {
+    const res = await fetch("books/catalog.json");
+    if (!res.ok) throw new Error(`HTTP ${res.status} for books/catalog.json`);
+    catalogCache = parseCatalog(await res.json());
+  } catch {
+    catalogCache = BOOKS; // dev server / vault checkout failed — fallback
+  }
+  return catalogCache;
+}
+
+function parseCatalog(raw: unknown): Book[] {
+  if (!Array.isArray(raw)) return BOOKS;
+  const seen = new Set<string>();
+  const books: Book[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const e = item as Record<string, unknown>;
+    const id = typeof e.id === "string" ? e.id : "";
+    const title = typeof e.title === "string" ? e.title : "";
+    const type = e.type === "pdf" ? "pdf" : e.type === "epub" ? "epub" : null;
+    const url = typeof e.url === "string" ? e.url : "";
+    if (!id || !title || !type || !url || seen.has(id)) continue;
+    // Only manifest-relative book paths, and nothing that escapes /books.
+    if (!url.startsWith("books/") || url.includes("..")) continue;
+    seen.add(id);
+    books.push({
+      id,
+      title,
+      type,
+      url,
+      ...(typeof e.author === "string" && e.author ? { author: e.author } : {}),
+    });
+  }
+  return books.length > 0 ? books : BOOKS;
+}

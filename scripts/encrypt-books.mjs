@@ -12,6 +12,11 @@
  * Defaults: --in content-source --out dist/books (the CI layout).
  * Locally: npm run encrypt-books wraps `--in public/books --out public/books`.
  *
+ * Also writes catalog.json next to the .enc files — the manifest the site
+ * fetches to build the Browse shelf, so new vault books appear without
+ * touching src/books.ts. Optional per-file metadata (title/author/id) is
+ * read from books.json in the input directory.
+ *
  * Passphrase source: BOOKS_PASSPHRASE env var, else an interactive prompt.
  * In CI there is no TTY — a missing env var fails the build ON PURPOSE so
  * plaintext books can never reach GitHub Pages.
@@ -75,7 +80,9 @@ async function deriveKey(salt) {
 
 let entries;
 try {
-  entries = (await readdir(inDir)).filter((f) => /\.(epub|pdf)$/i.test(f));
+  entries = (await readdir(inDir))
+    .filter((f) => /\.(epub|pdf)$/i.test(f))
+    .sort((a, b) => a.localeCompare(b));
 } catch {
   fail(`Input directory not found: ${inDir}`);
 }
@@ -104,4 +111,85 @@ for (const file of entries) {
   );
 }
 
+/* ---- catalog manifest --------------------------------------------------
+ * The site has no way of knowing what the vault contains, so this step also
+ * emits a manifest next to the ciphertext. Each entry mirrors the Book shape
+ * in src/books.ts: { id, title, author?, type, url }. Display metadata comes
+ * from books.json (filename → { title, author, id }) when present; otherwise
+ * the title is derived from the filename. */
+const SMALL_WORDS = new Set([
+  "a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on",
+  "or", "so", "the", "to", "up", "yet",
+]);
+
+function prettify(base) {
+  const words = base
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (words.length === 0) return null;
+  return words
+    .map((word, i) => {
+      const lower = word.toLowerCase();
+      if (i !== 0 && i !== words.length - 1 && SMALL_WORDS.has(lower)) {
+        return lower;
+      }
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(" ");
+}
+
+let metadata = {};
+try {
+  const raw = JSON.parse(
+    await readFile(path.join(inDir, "books.json"), "utf8")
+  );
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    metadata = raw;
+  }
+} catch {
+  metadata = {}; // books.json is optional
+}
+
+const usedIds = new Set();
+const catalog = entries.map((file) => {
+  const ext = path.extname(file).toLowerCase();
+  const base = file.slice(0, file.length - ext.length);
+  const meta = metadata[file] ?? {};
+  let id =
+    typeof meta.id === "string" && meta.id.trim()
+      ? meta.id.trim()
+      : base
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+  if (!id) id = "book";
+  while (usedIds.has(id)) id = `${id}-2`;
+  usedIds.add(id);
+
+  const entry = {
+    id,
+    title:
+      typeof meta.title === "string" && meta.title.trim()
+        ? meta.title.trim()
+        : (prettify(base) ?? base),
+    type: ext === ".pdf" ? "pdf" : "epub",
+    url: `books/${file}`,
+  };
+  if (typeof meta.author === "string" && meta.author.trim()) {
+    entry.author = meta.author.trim();
+  }
+  return entry;
+});
+
+await writeFile(
+  path.join(outDir, "catalog.json"),
+  `${JSON.stringify(catalog, null, 2)}\n`
+);
+
 console.log(`\nEncrypted ${entries.length} book(s) into ${outDir}`);
+console.log(
+  `✔ catalog.json (${catalog.length} entries) → ${path.join(outDir, "catalog.json")}`
+);

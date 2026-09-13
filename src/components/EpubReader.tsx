@@ -135,8 +135,11 @@ export default function EpubReader({
 
         // Track position and persist progress.
         rendition.on("relocated", (loc: unknown) => {
-          const start = (loc as { start?: { cfi?: string; href?: string } })
-            ?.start;
+          const location = loc as {
+            start?: { cfi?: string; href?: string };
+            end?: { percentage?: number };
+          };
+          const start = location?.start;
           const cfi = start?.cfi ?? "";
           const href = (start?.href ?? "").split("#")[0];
           const entries = tocRef.current;
@@ -144,10 +147,17 @@ export default function EpubReader({
           const label = idx >= 0 ? entries[idx].label : "";
           setChapter(label);
           setActiveToc(idx);
+          const prev = loadProgress(book.id);
+          const pct = location?.end?.percentage ?? 0;
           saveProgress(book.id, {
-            ...loadProgress(book.id),
+            ...prev,
             cfi,
             chapter: label,
+            lastReadAt: Date.now(),
+            updatedAt: Date.now(),
+            ...(pct >= 0.995 && !prev.finishedAt
+              ? { finishedAt: Date.now() }
+              : {}),
           });
         });
 

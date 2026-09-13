@@ -6,6 +6,7 @@ import ArticlesList from "./components/ArticlesList";
 import ArticleReader from "./components/ArticleReader";
 import { addArticle, getArticle } from "./articles";
 import { initSync } from "./articleSync";
+import { initStateSync } from "./stateSync";
 import { findBook } from "./userBooks";
 import { loadCatalog } from "./books";
 
@@ -13,10 +14,11 @@ export default function App() {
   const route = useHashRoute();
   const { theme, cycleTheme } = useTheme();
 
-  /* Start the read-later sync engine once: it listens for local article
-     mutations and pulls the remote gist once per session. */
+  /* Start the sync engines once: articles listen for local mutations and
+     pull the remote per session; books sync progress + pins via the vault. */
   useEffect(() => {
     initSync();
+    initStateSync();
   }, []);
 
   /* Load the vault-published catalog (books/catalog.json); the tick makes

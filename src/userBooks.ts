@@ -8,7 +8,11 @@
  * fetched at runtime by URL (same as static books).
  */
 import { getCatalog, type Book } from "./books";
-import { saveBookBlob, deleteBookBlob } from "./localBooks";
+import {
+  deleteBookBlob,
+  deleteCover,
+  saveBookBlob,
+} from "./localBooks";
 
 export interface UserBook extends Book {
   /** When this book was added to "my library". */
@@ -16,6 +20,12 @@ export interface UserBook extends Book {
   /** Set for books added from the user's device: key of the file blob in
    * IndexedDB (src/localBooks.ts). These books have no usable `url`. */
   blobKey?: string;
+  /** Last pin action (initially addedAt) — used by state sync merges. */
+  pinnedAt?: number;
+  /** Tombstone for cross-device unpins; null while the pin is live. */
+  removedAt?: number | null;
+  /** Last change to this entry — state sync LWW. */
+  updatedAt?: number;
 }
 
 export type BookType = "epub" | "pdf";
@@ -25,11 +35,25 @@ const STORAGE_KEY = "leaf:user-books";
 /** Fired by persist(); the Library listens to refresh. */
 export const USER_BOOKS_CHANGED_EVENT = "leaf:user-books-changed";
 
+/** Backfills sync fields on old entries so merges stay stable. */
+function normalize(b: UserBook): UserBook {
+  return {
+    ...b,
+    pinnedAt: b.pinnedAt ?? b.addedAt,
+    removedAt: b.removedAt ?? null,
+    updatedAt: b.updatedAt ?? b.addedAt,
+  };
+}
+
+function live(b: UserBook): boolean {
+  return !b.removedAt;
+}
+
 function readAll(): UserBook[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? (list as UserBook[]) : [];
+    return Array.isArray(list) ? (list as UserBook[]).map(normalize) : [];
   } catch {
     return [];
   }
@@ -45,12 +69,22 @@ function persist(list: UserBook[]): void {
 }
 
 export function loadUserBooks(): UserBook[] {
-  return readAll();
+  return readAll().filter(live);
 }
 
 /** My library only — URL books plus pinned catalog books, newest first. */
 export function getMyLibrary(): UserBook[] {
-  return [...readAll()].sort((a, b) => b.addedAt - a.addedAt);
+  return [...readAll()].filter(live).sort((a, b) => b.addedAt - a.addedAt);
+}
+
+/** Every pin record including tombstones — for the state sync engine. */
+export function loadAllPins(): UserBook[] {
+  return readAll();
+}
+
+/** Writes a full pin list — used by the state sync engine after a pull. */
+export function replacePins(list: UserBook[]): void {
+  persist(list.map(normalize));
 }
 
 function slugify(s: string): string {
@@ -125,7 +159,20 @@ export function addUserBook(input: {
   const url = normalizeBookUrl(input.url);
   const list = readAll();
   const existing = list.find((b) => b.url === url);
-  if (existing) return { book: existing, added: false };
+  if (existing) {
+    if (!existing.removedAt) return { book: existing, added: false };
+    // Re-adding a removed link book revives it.
+    const now = Date.now();
+    const revived: UserBook = {
+      ...existing,
+      title: input.title.trim() || existing.title,
+      removedAt: null,
+      pinnedAt: now,
+      updatedAt: now,
+    };
+    persist(list.map((b) => (b.url === url ? revived : b)));
+    return { book: revived, added: true };
+  }
 
   const title = input.title.trim() || deriveBookTitle(url);
   const book: UserBook = {
@@ -147,8 +194,28 @@ export function addUserBook(input: {
 export function pinBook(book: Book): { book: UserBook; added: boolean } {
   const list = readAll();
   const existing = list.find((b) => b.id === book.id);
-  if (existing) return { book: existing, added: false };
-  const entry: UserBook = { ...book, addedAt: Date.now() };
+  if (existing && !existing.removedAt) return { book: existing, added: false };
+  const now = Date.now();
+  if (existing) {
+    // Re-pinning a removed book revives it.
+    const revived: UserBook = {
+      ...existing,
+      ...book,
+      addedAt: existing.addedAt,
+      pinnedAt: now,
+      removedAt: null,
+      updatedAt: now,
+    };
+    persist(list.map((b) => (b.id === book.id ? revived : b)));
+    return { book: revived, added: true };
+  }
+  const entry: UserBook = {
+    ...book,
+    addedAt: now,
+    pinnedAt: now,
+    removedAt: null,
+    updatedAt: now,
+  };
   persist([entry, ...list]);
   return { book: entry, added: true };
 }
@@ -162,7 +229,18 @@ export function removeUserBook(id: string): void {
       /* storage already gone / private mode — nothing to do */
     });
   }
-  persist(readAll().filter((b) => b.id !== id));
+  deleteCover(id).catch(() => {
+    /* covers are optional */
+  });
+  // Keep a tombstone so the unpin propagates to synced devices.
+  const now = Date.now();
+  persist(
+    readAll().map((b) =>
+      b.id === id
+        ? { ...b, removedAt: now, pinnedAt: b.pinnedAt ?? b.addedAt, updatedAt: now }
+        : b
+    )
+  );
 }
 
 /** "My Novel.epub" -> "My Novel" */
@@ -177,12 +255,15 @@ function typeFromFileName(name: string): BookType | null {
   return null;
 }
 
-/**
- * Adds a book picked from the user's device: the file is stored as a Blob in
+/** Adds a book picked from the user's device: the file is stored as a Blob in
  * IndexedDB and referenced from the library entry via `blobKey`. The file
- * never leaves the browser.
+ * never leaves the browser. Pass the file's SHA-256 (when known) for
+ * duplicate detection.
  */
-export async function addLocalBook(file: File): Promise<{
+export async function addLocalBook(
+  file: File,
+  sha256?: string
+): Promise<{
   book: UserBook;
   added: boolean;
 }> {
@@ -195,7 +276,7 @@ export async function addLocalBook(file: File): Promise<{
   const id = makeId(new Set(list.map((b) => b.id)), file.name, title);
   const blobKey = `file:${id}`;
 
-  await saveBookBlob(blobKey, file);
+  await saveBookBlob(blobKey, file, sha256);
   // Ask the browser to keep this data across storage pressure — best effort.
   try {
     void navigator.storage?.persist?.();
@@ -218,11 +299,11 @@ export async function addLocalBook(file: File): Promise<{
 /** Every resolvable book — my library first, then the published catalog
  *  (static fallback until books/catalog.json has loaded). */
 export function getAllBooks(): Book[] {
-  return [...readAll(), ...getCatalog()];
+  return [...readAll().filter(live), ...getCatalog()];
 }
 
 export function isUserBook(id: string): boolean {
-  return readAll().some((b) => b.id === id);
+  return readAll().some((b) => !b.removedAt && b.id === id);
 }
 
 export function findBook(id: string): Book | undefined {

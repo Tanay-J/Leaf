@@ -24,8 +24,10 @@ import {
 } from "lucide-react";
 import { getCatalog, loadCatalog, reloadCatalog, type Book } from "../books";
 import { loadArticles } from "../articles";
-import { loadProgress, navigate, useLibraryView, type Theme } from "../lib";
+import { loadAllProgress, loadProgress, navigate, readDays, useLibraryView, type Theme } from "../lib";
 import ThemeButton from "./ThemeButton";
+import { findKeyBySha, hashBlob, loadCover, saveCover } from "../localBooks";
+import { readEpubMeta } from "../epubMeta";
 import {
   addUserBook,
   deriveBookTitle,
@@ -60,6 +62,35 @@ function progressInfo(book: Book): { label: string; pct: number | null } {
   return { label: "", pct: null };
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** What the quiet stats strip on My library shows. */
+function readingStats(): { finished: number; inProgress: number; streak: number } {
+  let finished = 0;
+  let inProgress = 0;
+  for (const p of Object.values(loadAllProgress())) {
+    if (p.finishedAt) finished++;
+    else if (p.lastReadAt) inProgress++;
+  }
+  const days = readDays();
+  const key = (d: Date) => d.toLocaleDateString("en-CA");
+  let streak = 0;
+  const cursor = new Date();
+  if (!days[key(cursor)]) cursor.setDate(cursor.getDate() - 1);
+  while (days[key(cursor)]) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return { finished, inProgress, streak };
+}
+
 interface Props {
   theme: Theme;
   onCycleTheme: () => void;
@@ -77,6 +108,33 @@ export default function Library({ theme, onCycleTheme }: Props) {
     () => loadArticles().filter((a) => !a.readAt).length,
     []
   );
+
+  /* Quiet reading-stats strip (finished / in progress / streak). */
+  const [stats, setStats] = useState(readingStats);
+  useEffect(() => {
+    if (tab === "mine") setStats(readingStats());
+  }, [tab, books]);
+
+  /* Extracted epub covers, keyed by book id (local adds only). */
+  const [covers, setCovers] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const ids = new Set([...books, ...catalog].map((b) => b.id));
+      const next: Record<string, string> = {};
+      await Promise.all(
+        Array.from(ids).map(async (id) => {
+          const blob = await loadCover(id).catch(() => null);
+          if (!blob) return;
+          next[id] = await blobToDataUrl(blob);
+        })
+      );
+      if (alive) setCovers(next);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [books, catalog]);
 
   /* Refresh my library whenever anything is pinned, unpinned, or added. */
   useEffect(() => {
@@ -125,14 +183,33 @@ export default function Library({ theme, onCycleTheme }: Props) {
     if (!file) return;
     setAddError("");
     setAddBusy(true);
-    addLocalBook(file)
-      .then(() => {
-        setAddUrl("");
-        setAddTitle("");
-        setAddAuthor("");
-        setAddType("epub");
-        setShowAdd(false);
-      })
+    (async () => {
+      // Duplicate detection: identical content anywhere in the library?
+      const sha = await hashBlob(file);
+      const dupKey = sha ? await findKeyBySha(sha) : null;
+      if (dupKey) {
+        const known = getMyLibrary().find((b) => b.blobKey === dupKey);
+        throw new Error(
+          known
+            ? `Already in your library as “${known.title}”.`
+            : "This file is already in your library."
+        );
+      }
+      // Epub metadata prefill (fills blanks only).
+      let meta: Awaited<ReturnType<typeof readEpubMeta>> = null;
+      if (/\.epub$/i.test(file.name)) {
+        meta = await readEpubMeta(file);
+        if (meta?.title && !addTitle.trim()) setAddTitle(meta.title);
+        if (meta?.author && !addAuthor.trim()) setAddAuthor(meta.author);
+      }
+      const { book } = await addLocalBook(file, sha ?? undefined);
+      if (meta?.cover) await saveCover(book.id, meta.cover);
+      setAddUrl("");
+      setAddTitle("");
+      setAddAuthor("");
+      setAddType("epub");
+      setShowAdd(false);
+    })()
       .catch((err) => {
         setAddError(
           err instanceof Error ? err.message : "Could not add that file."
@@ -241,14 +318,31 @@ export default function Library({ theme, onCycleTheme }: Props) {
   const startVaultUpload = async (file: File) => {
     setAddError("");
     setVaultNote("");
+    setAddBusy(false);
     setVaultBusy(true);
     setVaultPhase("upload");
     setVaultPct(0);
     const startedAt = Date.now();
     try {
+      // Epub metadata prefill so vault uploads carry title/author for CI.
+      let title = addTitle;
+      let author = addAuthor;
+      let cover: Blob | undefined;
+      if (/\.epub$/i.test(file.name)) {
+        const meta = await readEpubMeta(file).catch(() => null);
+        if (meta?.title && !title) {
+          title = meta.title;
+          setAddTitle(meta.title);
+        }
+        if (meta?.author && !author) {
+          author = meta.author;
+          setAddAuthor(meta.author);
+        }
+        cover = meta?.cover;
+      }
       const res = await uploadToVault(
         file,
-        { title: addTitle, author: addAuthor },
+        { title, author },
         (pct) => setVaultPct(pct)
       );
       if (!res.ok) {
@@ -276,6 +370,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
           const added = fresh.find((b) => b.url === `books/${res.fileName}`);
           if (added) {
             pinBook(added);
+            if (cover) await saveCover(added.id, cover);
             setTab("browse");
           }
           note += added
@@ -380,6 +475,13 @@ return (
       </header>
 
       <main className="content">
+        {tab === "mine" && (stats.finished > 0 || stats.inProgress > 0) && (
+          <p className="reading-stats">
+            {stats.finished} finished · {stats.inProgress} in progress
+            {stats.streak > 1 ? ` · 🔥 ${stats.streak}-day streak` : ""}
+          </p>
+        )}
+
         <div className="library-tabs" role="tablist" aria-label="Choose which collection is shown">
           <button
             role="tab"
@@ -447,7 +549,13 @@ return (
                     }
                   >
                     <div className="book-cover">
-                      {b.type === "epub" ? (
+                      {covers[b.id] ? (
+                        <img
+                          className="book-cover-img"
+                          src={covers[b.id]}
+                          alt=""
+                        />
+                      ) : b.type === "epub" ? (
                         <BookOpen size={34} />
                       ) : (
                         <FileText size={34} />

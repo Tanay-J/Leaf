@@ -119,9 +119,19 @@ export interface BookProgress {
   page?: number;
   total?: number;
   zoom?: number;
+  /** Last time the position itself moved (not a font tweak) — sync LWW. */
+  lastReadAt?: number | null;
+  /** First time the book was read to the end. */
+  finishedAt?: number | null;
+  /** Last time any field changed — sync LWW. */
+  updatedAt?: number;
 }
 
+/** Fired by saveProgress; the state sync engine listens to schedule pushes. */
+export const PROGRESS_SAVED_EVENT = "leaf:progress-changed";
+
 const progressKey = (id: string) => `reader:${id}`;
+const PROGRESS_PREFIX = "reader:";
 
 export function loadProgress(id: string): BookProgress {
   try {
@@ -131,9 +141,96 @@ export function loadProgress(id: string): BookProgress {
   }
 }
 
+/** Every progress record, keyed by book id — for the state sync engine. */
+export function loadAllProgress(): Record<string, BookProgress> {
+  const out: Record<string, BookProgress> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(PROGRESS_PREFIX)) continue;
+      try {
+        out[key.slice(PROGRESS_PREFIX.length)] = JSON.parse(
+          localStorage.getItem(key) ?? "{}"
+        ) as BookProgress;
+      } catch {
+        /* skip malformed entries */
+      }
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  return out;
+}
+
+/** Writes a full progress map — used by the state sync engine after a pull. */
+export function replaceProgress(map: Record<string, BookProgress>): void {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(PROGRESS_PREFIX)) doomed.push(key);
+    }
+    for (const key of doomed) localStorage.removeItem(key);
+    for (const [id, data] of Object.entries(map)) {
+      localStorage.setItem(progressKey(id), JSON.stringify(data));
+    }
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export function saveProgress(id: string, data: BookProgress): void {
   try {
     localStorage.setItem(progressKey(id), JSON.stringify(data));
+  } catch {
+    /* storage unavailable */
+  }
+  if (data.lastReadAt) markReadDay();
+  try {
+    window.dispatchEvent(new CustomEvent(PROGRESS_SAVED_EVENT));
+  } catch {
+    /* SSR / unavailable */
+  }
+}
+
+/* ---------- reading activity days (drives streaks) ---------- */
+
+const READ_DAYS_KEY = "leaf:read-days";
+
+/** Local calendar day as YYYY-MM-DD (en-CA formats exactly that). */
+export function dayKey(d = new Date()): string {
+  return d.toLocaleDateString("en-CA");
+}
+
+export function readDays(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(READ_DAYS_KEY) ?? "{}") as Record<
+      string,
+      boolean
+    >;
+  } catch {
+    return {};
+  }
+}
+
+function markReadDay(): void {
+  try {
+    localStorage.setItem(
+      READ_DAYS_KEY,
+      JSON.stringify({ ...readDays(), [dayKey()]: true })
+    );
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Union-writes the activity map — used by the state sync engine. */
+export function replaceReadDays(map: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(
+      READ_DAYS_KEY,
+      JSON.stringify({ ...readDays(), ...map })
+    );
   } catch {
     /* storage unavailable */
   }

@@ -206,9 +206,26 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
   }, [renderPage, status]);
 
   /* Persist progress. */
+  const saveGuard = useRef(true);
   useEffect(() => {
     if (!numPages) return;
-    saveProgress(book.id, { page: clampPage(page), total: numPages, zoom });
+    const prev = loadProgress(book.id);
+    // Skip the first run (restored state isn't reading activity) so merely
+    // reopening a book never marks it finished or read-today.
+    const moved = !saveGuard.current;
+    saveGuard.current = false;
+    saveProgress(book.id, {
+      ...prev,
+      page: clampPage(page),
+      total: numPages,
+      zoom,
+      ...(moved && page > 1
+        ? { lastReadAt: Date.now(), updatedAt: Date.now() }
+        : {}),
+      ...(moved && page >= numPages && !prev.finishedAt
+        ? { finishedAt: Date.now() }
+        : {}),
+    });
   }, [page, zoom, numPages, book.id, clampPage]);
 
   /* Re-render on container resize (fit-to-width depends on it). */

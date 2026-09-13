@@ -20,8 +20,11 @@ catalog that ships with Leaf.
 - **Find a book** — search by title or author (scoped to whichever tab you're
   on), or switch between grid and list views.
 - **Open a book** — click any card to start reading.
-- **Resume reading** — every book remembers the page or chapter you were on,
-  per browser. Pinning and unpinning never loses your place.
+- **Resume reading** — every book remembers the page or chapter you were on.
+  With your vault connected, your place, pins, and "finished" marks follow
+  you across devices automatically.
+- **Reading stats** — My library quietly shows how many books you've
+  finished, how many you're reading, and your current reading streak.
 
 ## Adding books to the site
 

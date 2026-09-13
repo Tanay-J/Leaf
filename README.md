@@ -15,7 +15,8 @@ catalog that ships with Leaf.
 - **Add a book** — click **Add book** and either paste a link to an EPUB/PDF
   hosted anywhere, or choose a file from this device. Device files are stored
   in your browser (IndexedDB) and never uploaded; removing the book deletes
-  its stored copy.
+  its stored copy. You can also **upload a file to your vault** — it's
+  published on every device after the deploy (see below).
 - **Find a book** — search by title or author (scoped to whichever tab you're
   on), or switch between grid and list views.
 - **Open a book** — click any card to start reading.
@@ -33,7 +34,20 @@ time — book files live only there, never in this repo.
    Without it, the title is derived from the filename.
 3. Deploy manually: open the **Actions** tab in this repo, pick
    **Deploy to GitHub Pages**, and click **Run workflow**. Nothing runs on a
-   schedule — books only go live when you trigger a deploy.
+   schedule — books only go live when a deploy is triggered.
+
+### Upload books from the app (recommended)
+
+In **Add book**, choose **Set up vault uploads** and follow the steps shown
+there (you'll need a GitHub token — the app walks you through what to
+create). After that, **Add book → Choose an EPUB or PDF to upload** sends
+the book to your private vault from any browser, including a phone. Once
+the deploy finishes, the book shows up under **Browse** on every device and
+can be pinned to your library with **+**.
+
+The token is stored in this browser only and can be revoked any time;
+**Disconnect vault** forgets it. Books stay private — they're encrypted
+before being published.
 
 New books then show up under **Browse** automatically; pin them to your
 shelf with **+**.

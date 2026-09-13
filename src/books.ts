@@ -197,6 +197,15 @@ export async function loadCatalog(): Promise<Book[]> {
   return catalogCache;
 }
 
+/**
+ * Re-fetches books/catalog.json — used after a vault upload finishes its
+ * deploy so the new book appears without a full page reload.
+ */
+export async function reloadCatalog(): Promise<Book[]> {
+  catalogCache = null;
+  return loadCatalog();
+}
+
 function parseCatalog(raw: unknown): Book[] {
   if (!Array.isArray(raw)) return BOOKS;
   const seen = new Set<string>();

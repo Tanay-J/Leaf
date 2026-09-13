@@ -5,3 +5,6 @@ dist
 
 # Book files are kept out of this repo entirely — see README.
 public/books/
+
+# Private setup notes (tokens, secrets, repo names) — local only.
+TECHNICAL.md

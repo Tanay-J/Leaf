@@ -44,6 +44,7 @@ import {
   VAULT_STATUS_EVENT,
   vaultConnect,
   vaultDisconnect,
+  vaultEnableWatch,
   waitForDeploy,
   type VaultStatus,
 } from "../vaultSync";
@@ -203,6 +204,12 @@ export default function Library({ theme, onCycleTheme }: Props) {
   const [vaultPhase, setVaultPhase] = useState<"upload" | "deploy" | null>(null);
   const [vaultPct, setVaultPct] = useState(0);
   const vaultFileRef = useRef<HTMLInputElement>(null);
+  const [showWatchSetup, setShowWatchSetup] = useState(false);
+  const [watchDone, setWatchDone] = useState(false);
+  const [watchLeafRepo, setWatchLeafRepo] = useState("");
+  const [watchToken, setWatchToken] = useState("");
+  const [watchError, setWatchError] = useState("");
+  const [watchBusy, setWatchBusy] = useState(false);
 
   /* Keep the connect/disconnect state in step with vaultSync. */
   useEffect(() => {
@@ -212,8 +219,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
     return () => window.removeEventListener(VAULT_STATUS_EVENT, onVault);
   }, []);
 
-  const connectVault = async (e: FormEvent) => {
-    e.preventDefault();
+  const connectVault = async () => {
     setVaultBusy(true);
     setVaultError("");
     const res = await vaultConnect({
@@ -297,6 +303,20 @@ export default function Library({ theme, onCycleTheme }: Props) {
     e.target.value = ""; // allow re-picking the same file later
     if (!file) return;
     void startVaultUpload(file);
+  };
+
+  const enableWatch = async () => {
+    setWatchBusy(true);
+    setWatchError("");
+    const res = await vaultEnableWatch(watchLeafRepo, watchToken);
+    if (res.ok) {
+      setWatchToken("");
+      setShowWatchSetup(false);
+      setWatchDone(true);
+    } else {
+      setWatchError(res.error);
+    }
+    setWatchBusy(false);
   };
 
 return (
@@ -711,12 +731,73 @@ return (
                       vaultDisconnect();
                       setVaultNote("");
                       setShowVaultSetup(false);
+                      setShowWatchSetup(false);
+                      setWatchDone(false);
                     }}
                     title="Forget the vault token on this device"
                   >
                     Disconnect vault
                   </button>
                 </div>
+                {!canWatchDeploys() && !watchDone && (
+                  <div className="vault-meta-row">
+                    <button
+                      type="button"
+                      className="secondary-action vault-disconnect"
+                      onClick={() => setShowWatchSetup((v) => !v)}
+                      title="Live “Deploying…” status and auto-pin after each upload"
+                    >
+                      Add deploy watching
+                    </button>
+                  </div>
+                )}
+                {watchDone && !canWatchDeploys() && (
+                  <p className="vault-note">
+                    Deploy watching is on — uploads now show live
+                    “Deploying…” status.
+                  </p>
+                )}
+                {showWatchSetup && (
+                  <div className="vault-connect">
+                    <label className="field">
+                      <span>Leaf repo (owner/name)</span>
+                      <input
+                        type="text"
+                        value={watchLeafRepo}
+                        onChange={(e) => setWatchLeafRepo(e.target.value)}
+                        placeholder="your-name/leaf"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Token with Actions: Read on the Leaf repo</span>
+                      <input
+                        type="password"
+                        value={watchToken}
+                        onChange={(e) => {
+                          setWatchToken(e.target.value);
+                          if (watchError) setWatchError("");
+                        }}
+                        placeholder="github_pat_…"
+                        autoComplete="off"
+                      />
+                    </label>
+                    {watchError && <p className="article-error">{watchError}</p>}
+                    <button
+                      type="button"
+                      className="add-article-btn"
+                      onClick={() => void enableWatch()}
+                      disabled={watchBusy}
+                    >
+                      {watchBusy ? (
+                        <Loader2 className="spin" size={15} />
+                      ) : (
+                        <CloudUpload size={15} />
+                      )}
+                      {watchBusy ? "Checking…" : "Enable deploy watching"}
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -734,7 +815,7 @@ return (
                   Leaf.
                 </p>
                 {showVaultSetup && (
-                  <form className="vault-connect" onSubmit={connectVault}>
+                  <div className="vault-connect">
                     <label className="field">
                       <span>Fine-grained token (Contents: Read and write)</span>
                       <input
@@ -785,8 +866,9 @@ return (
                       <p className="article-error">{vaultError}</p>
                     )}
                     <button
+                      type="button"
                       className="add-article-btn"
-                      type="submit"
+                      onClick={() => void connectVault()}
                       disabled={vaultBusy}
                     >
                       {vaultBusy ? (
@@ -796,7 +878,7 @@ return (
                       )}
                       {vaultBusy ? "Connecting…" : "Connect vault"}
                     </button>
-                  </form>
+                  </div>
                 )}
               </>
             )}

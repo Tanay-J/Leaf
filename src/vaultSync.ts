@@ -442,6 +442,43 @@ export function vaultDisconnect(): void {
 }
 
 /**
+ * Adds deploy watching to an existing connection without re-entering the
+ * vault token: validates the Leaf repo with the watch token, then rewrites
+ * the stored config in place.
+ */
+export async function vaultEnableWatch(
+  leafRepoInput: string,
+  leafTokenInput: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const cfg = config;
+  if (!cfg) return { ok: false, error: "Connect the vault first." };
+
+  const leafRepo = leafRepoInput.trim().replace(/^\/+|\/+$/g, "");
+  const leafToken = leafTokenInput.trim();
+  if (!/^[^/\s]+\/[^/\s]+$/.test(leafRepo)) {
+    return { ok: false, error: "Leaf repo must look like owner/name." };
+  }
+  if (!leafToken) {
+    return {
+      ok: false,
+      error: "Paste a token with Actions: Read on the Leaf repo.",
+    };
+  }
+  try {
+    const leafRes = await gh(`/repos/${leafRepo}`, { token: leafToken });
+    if (!leafRes.ok) throw new Error(await responseError(leafRes));
+    writeConfig({ ...cfg, leafRepo, leafToken });
+    setStatus({ state: "connected", repo: cfg.repo });
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
  * Uploads a picked file to the vault root. Same name + same size counts as
  * "already there" (skipped); a different size is committed as a replacement.
  * `onProgress` reports upload percentage (0–100) while the request runs.

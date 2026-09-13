@@ -90,8 +90,13 @@ Articles stay in your browser, just like reading progress.
 
 ### Sync across devices
 
-Your reading list can follow you across browsers and computers, synced through
-a private GitHub Gist.
+Your reading list can follow you across browsers and computers.
+
+**Easiest — through your vault:** if you've connected your vault (book
+uploads), open the Reading list and click **Sync via my vault**. No token,
+no setup — the list syncs through your vault on every connected device.
+
+**Classic — through a GitHub Gist:**
 
 1. Create a **classic** personal access token with only the **`gist`** scope
    (GitHub → Settings → Developer settings → Personal access tokens → Tokens

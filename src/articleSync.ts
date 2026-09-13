@@ -1,15 +1,21 @@
 /**
- * Optional cross-device sync for the reading list, backed by a GitHub Gist.
+ * Optional cross-device sync for the reading list.
  *
- * The browser is always the source of truth; the gist is just the wire.
- * Flow:
+ * The browser is always the source of truth; the remote is just the wire.
+ * Two transports share one merge engine (URL-keyed, last-writer-wins per
+ * field, tombstones for deletes):
+ *   - vault — articles/reading-list.json on a "sync" branch of the private
+ *     vault, powered by the existing vault connection (no extra token)
+ *   - gist  — a private GitHub Gist, for the classic personal-access-token
+ *     flow
+ *
+ * Flow either way:
  *   - local mutations -> articles.ts fires ARTICLES_CHANGED_EVENT
- *   - we debounce and PATCH the gist
- *   - on startup / "Sync now" we GET the gist, merge with local (URL-keyed,
- *     last-writer-wins per field, tombstones for deletes), and persist.
+ *   - we debounce a push
+ *   - on startup / "Sync now" we pull, merge with local, and persist.
  *
- * Auth is a GitHub classic personal access token with only the "gist" scope,
- * stored in localStorage (same threat model as the rest of the app).
+ * The active backend is a stored preference; devices without it simply keep
+ * their list local.
  */
 import {
   ARTICLES_CHANGED_EVENT,
@@ -18,8 +24,21 @@ import {
   replaceArticles,
   type SavedArticle,
 } from "./articles";
+import {
+  ensureVaultBranch,
+  getVaultText,
+  isVaultConnected,
+  putVaultText,
+  VaultConflictError,
+  VaultMissingRefError,
+} from "./vaultSync";
 
 const SYNC_KEY = "leaf:sync";
+const BACKEND_KEY = "leaf:article-sync";
+/** Vault transport: list file + branch (never triggers a Pages deploy). */
+const LIST_PATH = "articles/reading-list.json";
+const SYNC_BRANCH = "sync";
+const VAULT_COMMIT_MSG = "Sync reading list (Leaf)";
 const GIST_DESCRIPTION = "Leaf — reading list";
 const GIST_FILENAME = "leaf-reading-list.json";
 const PAYLOAD_SCHEMA = 1;
@@ -36,6 +55,14 @@ export interface SyncConfig {
   lastSyncedAt: number | null;
 }
 
+/** Which wire the list syncs over. */
+export type Backend = "gist" | "vault";
+
+interface SyncMeta {
+  backend: Backend;
+  lastSyncedAt: number | null;
+}
+
 export type SyncState =
   | "disconnected"
   | "connecting"
@@ -47,19 +74,21 @@ export interface SyncStatus {
   state: SyncState;
   lastSyncedAt: number | null;
   lastError?: string;
+  backend?: Backend | null;
 }
 
 const SYNC_STATUS_EVENT = "leaf:sync-status";
 
 let config: SyncConfig | null = readConfig();
-let status: SyncStatus = config
-  ? { state: "connected", lastSyncedAt: config.lastSyncedAt }
-  : { state: "disconnected", lastSyncedAt: null };
+let meta: SyncMeta | null = readMeta();
+let status: SyncStatus = initStatus();
 
 let initialized = false;
 let applyingRemote = false;
 let pushTimer: number | undefined;
 let lastPushAt = 0;
+/** Blob sha of the last vault read — lets pushes detect lost races. */
+let vaultSha: string | null = null;
 
 /* ---------- config / status ---------- */
 
@@ -91,6 +120,46 @@ function writeConfig(c: SyncConfig | null): void {
   }
 }
 
+function readMeta(): SyncMeta | null {
+  try {
+    const raw = localStorage.getItem(BACKEND_KEY);
+    if (!raw) return null;
+    const m = JSON.parse(raw) as Partial<SyncMeta>;
+    if (m?.backend !== "gist" && m?.backend !== "vault") return null;
+    return { backend: m.backend, lastSyncedAt: m.lastSyncedAt ?? null };
+  } catch {
+    return null;
+  }
+}
+
+function writeMeta(m: SyncMeta | null): void {
+  meta = m;
+  try {
+    if (m) localStorage.setItem(BACKEND_KEY, JSON.stringify(m));
+    else localStorage.removeItem(BACKEND_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** The transport that's both selected and actually usable right now. */
+function activeBackend(): Backend | null {
+  if (!meta) return null;
+  if (meta.backend === "vault") return isVaultConnected() ? "vault" : null;
+  return config ? "gist" : null;
+}
+
+function initStatus(): SyncStatus {
+  const backend = activeBackend();
+  return backend
+    ? {
+        state: "connected",
+        lastSyncedAt: meta?.lastSyncedAt ?? null,
+        backend,
+      }
+    : { state: "disconnected", lastSyncedAt: null, backend: null };
+}
+
 function setStatus(next: SyncStatus): void {
   status = next;
   try {
@@ -107,7 +176,7 @@ export function getSyncStatus(): SyncStatus {
 }
 
 export function isSyncConnected(): boolean {
-  return !!config;
+  return !!activeBackend();
 }
 
 /* ---------- GitHub API ---------- */
@@ -218,9 +287,9 @@ function mergePair(l: SavedArticle, r: SavedArticle): SavedArticle {
   };
 }
 
-/* ---------- pull / push ---------- */
+/* ---------- gist transport ---------- */
 
-async function pullRemote(): Promise<SavedArticle[]> {
+async function pullGist(): Promise<SavedArticle[]> {
   if (!config) return [];
   const res = await gh(`/gists/${config.gistId}`);
   if (!res.ok) throw new Error(githubError(res));
@@ -232,7 +301,7 @@ async function pullRemote(): Promise<SavedArticle[]> {
   return parsed ?? [];
 }
 
-async function pushRemote(list: SavedArticle[]): Promise<void> {
+async function pushGist(list: SavedArticle[]): Promise<void> {
   if (!config) return;
   const res = await gh(`/gists/${config.gistId}`, {
     method: "PATCH",
@@ -241,9 +310,53 @@ async function pushRemote(list: SavedArticle[]): Promise<void> {
   if (!res.ok) throw new Error(githubError(res));
 }
 
-/** GET the gist, merge into local, persist. Emits status. */
+/* ---------- vault transport ---------- */
+
+async function pullVault(): Promise<SavedArticle[]> {
+  const entry = await getVaultText(LIST_PATH, SYNC_BRANCH);
+  vaultSha = entry?.sha ?? null;
+  const parsed = entry?.content ? deserialize(entry.content) : null;
+  return parsed ?? [];
+}
+
+async function pushVault(list: SavedArticle[]): Promise<void> {
+  try {
+    vaultSha = await putVaultText(LIST_PATH, serialize(list), {
+      ref: SYNC_BRANCH,
+      message: VAULT_COMMIT_MSG,
+      ...(vaultSha ? { sha: vaultSha } : {}),
+    });
+  } catch (err) {
+    if (!(err instanceof VaultMissingRefError)) throw err;
+    // First sync on this vault — bootstrap the branch and retry.
+    await ensureVaultBranch(SYNC_BRANCH);
+    vaultSha = await putVaultText(LIST_PATH, serialize(list), {
+      ref: SYNC_BRANCH,
+      message: VAULT_COMMIT_MSG,
+    });
+  }
+}
+
+/* ---------- dispatch ---------- */
+
+function pullRemote(): Promise<SavedArticle[]> {
+  const backend = activeBackend();
+  if (backend === "vault") return pullVault();
+  if (backend === "gist" && config) return pullGist();
+  return Promise.resolve([]);
+}
+
+function pushRemote(list: SavedArticle[]): Promise<void> {
+  const backend = activeBackend();
+  if (backend === "vault") return pushVault(list);
+  if (backend === "gist" && config) return pushGist(list);
+  return Promise.resolve();
+}
+
+/** GET the remote, merge into local, persist. Emits status. */
 export async function pullAndMerge(): Promise<void> {
-  if (!config) return;
+  const backend = activeBackend();
+  if (!backend || !meta) return;
   const remote = await pullRemote();
   const merged = mergeLists(loadAllArticles(), remote);
   applyingRemote = true;
@@ -252,32 +365,47 @@ export async function pullAndMerge(): Promise<void> {
   } finally {
     applyingRemote = false;
   }
-  const next = { ...config, lastSyncedAt: Date.now() };
-  writeConfig(next);
-  setStatus({ state: "connected", lastSyncedAt: next.lastSyncedAt });
+  meta = { ...meta, lastSyncedAt: Date.now() };
+  writeMeta(meta);
+  setStatus({ state: "connected", lastSyncedAt: meta.lastSyncedAt, backend });
 }
 
 async function doPush(): Promise<void> {
-  if (!config) return;
-  setStatus({ state: "syncing", lastSyncedAt: status.lastSyncedAt });
+  const backend = activeBackend();
+  if (!backend || !meta) return;
+  setStatus({ state: "syncing", lastSyncedAt: status.lastSyncedAt, backend });
   try {
-    await pushRemote(loadAllArticles());
+    try {
+      await pushRemote(loadAllArticles());
+    } catch (err) {
+      if (!(err instanceof VaultConflictError) || backend !== "vault") {
+        throw err;
+      }
+      // Another device committed since our last read — merge and retry once.
+      await pullAndMerge();
+      await pushRemote(loadAllArticles());
+    }
     lastPushAt = Date.now();
-    const next = { ...config, lastSyncedAt: Date.now() };
-    writeConfig(next);
-    setStatus({ state: "connected", lastSyncedAt: next.lastSyncedAt });
+    meta = { ...meta, lastSyncedAt: Date.now() };
+    writeMeta(meta);
+    setStatus({
+      state: "connected",
+      lastSyncedAt: meta.lastSyncedAt,
+      backend,
+    });
   } catch (err) {
     setStatus({
       state: "error",
       lastSyncedAt: status.lastSyncedAt,
       lastError: err instanceof Error ? err.message : String(err),
+      backend,
     });
     // The change listener stays active, so the next mutation retries.
   }
 }
 
 function schedulePush(): void {
-  if (pushTimer !== undefined || !config) return;
+  if (pushTimer !== undefined || !activeBackend()) return;
   const wait = Math.max(DEBOUNCE_MS, lastPushAt + PUSH_COOLDOWN_MS - Date.now());
   pushTimer = window.setTimeout(() => {
     pushTimer = undefined;
@@ -286,7 +414,7 @@ function schedulePush(): void {
 }
 
 function onArticlesChanged(): void {
-  if (applyingRemote || !config) return;
+  if (applyingRemote || !activeBackend()) return;
   schedulePush();
 }
 
@@ -302,7 +430,7 @@ export function initSync(): void {
   } catch {
     /* unavailable */
   }
-  if (config && !startupPullQueued) {
+  if (activeBackend() && !startupPullQueued) {
     startupPullQueued = true;
     window.setTimeout(() => {
       void pullAndMerge().catch(() => {
@@ -321,7 +449,7 @@ export async function syncConnect(
 ): Promise<{ ok: true; gistId: string } | { ok: false; error: string }> {
   const token = rawToken.trim();
   if (!token) return { ok: false, error: "Enter a GitHub token first." };
-  setStatus({ state: "connecting", lastSyncedAt: null });
+  setStatus({ state: "connecting", lastSyncedAt: null, backend: "gist" });
 
   try {
     // Validate the token (only needs the `gist` scope).
@@ -356,12 +484,15 @@ export async function syncConnect(
     if (!gistId) return { ok: false, error: "Could not create the gist." };
 
     writeConfig({ token, gistId, lastSyncedAt: null });
+    meta = { backend: "gist", lastSyncedAt: null };
+    writeMeta(meta);
     await pullAndMerge();
     await doPush();
     return { ok: true, gistId };
   } catch (err) {
     writeConfig(null);
-    setStatus({ state: "disconnected", lastSyncedAt: null });
+    writeMeta(null);
+    setStatus({ state: "disconnected", lastSyncedAt: null, backend: null });
     return {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
@@ -369,9 +500,42 @@ export async function syncConnect(
   }
 }
 
+/**
+ * Connect list sync through the already-configured vault — no token needed.
+ * The list lives as articles/reading-list.json on the vault's "sync" branch,
+ * which never triggers a Pages deploy.
+ */
+export async function syncConnectViaVault(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  if (!isVaultConnected()) {
+    return {
+      ok: false,
+      error: "Connect the vault first (Add book → Set up vault uploads).",
+    };
+  }
+  meta = { backend: "vault", lastSyncedAt: null };
+  writeMeta(meta);
+  setStatus({ state: "connecting", lastSyncedAt: null, backend: "vault" });
+  try {
+    await pullAndMerge();
+    await doPush();
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setStatus({
+      state: "error",
+      lastSyncedAt: meta?.lastSyncedAt ?? null,
+      lastError: message,
+      backend: "vault",
+    });
+    return { ok: false, error: message };
+  }
+}
+
 /** Manual "Sync now": converge then push back. */
 export async function syncNow(): Promise<void> {
-  if (!config) return;
+  if (!activeBackend()) return;
   setStatus({ state: "syncing", lastSyncedAt: status.lastSyncedAt });
   await pullAndMerge().catch(async (err) => {
     setStatus({
@@ -390,6 +554,9 @@ export function syncDisconnect(): void {
     pushTimer = undefined;
   }
   lastPushAt = 0;
-  writeConfig(null);
-  setStatus({ state: "disconnected", lastSyncedAt: null });
+  vaultSha = null;
+  // Stop syncing the list only: the vault connection (books) and the stored
+  // gist credentials both survive, so either can be re-enabled later.
+  writeMeta(null);
+  setStatus({ state: "disconnected", lastSyncedAt: null, backend: null });
 }

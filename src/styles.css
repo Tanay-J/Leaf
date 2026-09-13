@@ -1292,6 +1292,10 @@ html.dark-theme .brand-mark-articles {
   background: color-mix(in srgb, var(--primary-bg) 80%, var(--primary-color));
 }
 
+.sync-vault-cta {
+  margin-top: 12px;
+}
+
 /* ---------- Sync across devices ---------- */
 
 .sync-card {

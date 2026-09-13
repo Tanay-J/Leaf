@@ -18,10 +18,12 @@ import {
 import {
   getSyncStatus,
   syncConnect,
+  syncConnectViaVault,
   syncDisconnect,
   syncNow,
   type SyncStatus,
 } from "../articleSync";
+import { isVaultConnected } from "../vaultSync";
 import { navigate, type Theme } from "../lib";
 import ThemeButton from "./ThemeButton";
 
@@ -80,6 +82,18 @@ export default function ArticlesList({
       setConnectError(res.error);
     } else {
       setToken("");
+      setArticles(loadArticles());
+    }
+    setSyncBusy(false);
+  };
+
+  const connectViaVault = async () => {
+    setSyncBusy(true);
+    setConnectError("");
+    const res = await syncConnectViaVault();
+    if (!res.ok) {
+      setConnectError(res.error);
+    } else {
       setArticles(loadArticles());
     }
     setSyncBusy(false);
@@ -222,11 +236,30 @@ export default function ArticlesList({
           {syncStatus.state === "disconnected" ? (
             <>
               <p className="sync-hint">
-                Share your reading list with every browser and device you use,
-                synced through a GitHub Gist.
+                Share your reading list with every browser and device you use.
               </p>
+              {isVaultConnected() ? (
+                <button
+                  type="button"
+                  className="add-article-btn sync-vault-cta"
+                  onClick={() => void connectViaVault()}
+                  disabled={syncBusy}
+                  title="Uses your existing vault connection — no token needed"
+                >
+                  {syncBusy ? (
+                    <Loader2 className="spin" size={15} />
+                  ) : (
+                    <Link2 size={15} />
+                  )}
+                  {syncBusy ? "Connecting…" : "Sync via my vault"}
+                </button>
+              ) : null}
               <details className="sync-help">
-                <summary>How to get a token</summary>
+                <summary>
+                  {isVaultConnected()
+                    ? "Or sync through a GitHub Gist instead"
+                    : "How to get a token"}
+                </summary>
                 <ol>
                   <li>
                     Create a{" "}
@@ -284,7 +317,11 @@ export default function ArticlesList({
                     : syncStatus.state === "error"
                       ? syncStatus.lastError ?? "Sync failed — will retry."
                       : syncStatus.lastSyncedAt != null
-                        ? `Synced ${timeAgo(syncStatus.lastSyncedAt)}.`
+                        ? `Synced ${timeAgo(syncStatus.lastSyncedAt)}${
+                            syncStatus.backend === "vault"
+                              ? " via your vault"
+                              : ""
+                          }.`
                         : "Connected."}
               </p>
               <div className="sync-actions">

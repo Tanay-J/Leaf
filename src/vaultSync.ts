@@ -441,6 +441,123 @@ export function vaultDisconnect(): void {
   setStatus({ state: "disconnected" });
 }
 
+/* ---------- generic vault text files (used by other sync engines) ---------- */
+
+/** Thrown when a PUT loses a race with another commit. */
+export class VaultConflictError extends Error {
+  constructor() {
+    super("The file changed meanwhile — merge and retry.");
+    this.name = "VaultConflictError";
+  }
+}
+
+/** Thrown when the target branch does not exist yet. */
+export class VaultMissingRefError extends Error {
+  constructor() {
+    super("The target ref does not exist yet.");
+    this.name = "VaultMissingRefError";
+  }
+}
+
+export interface VaultText {
+  content: string;
+  sha: string;
+}
+
+function encodePath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+/** Reads a small text file from the vault; null when it doesn't exist. */
+export async function getVaultText(
+  path: string,
+  ref?: string
+): Promise<VaultText | null> {
+  const cfg = config;
+  if (!cfg) throw new Error("Vault not connected.");
+  const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  const res = await gh(
+    `/repos/${cfg.repo}/contents/${encodePath(path)}${query}`,
+    { token: cfg.token }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await responseError(res));
+  const data = (await res.json()) as { sha?: string; content?: string };
+  return {
+    content: data.content ? base64ToText(data.content) : "",
+    sha: data.sha ?? "",
+  };
+}
+
+/**
+ * Writes a small text file (commit via the Contents API). Pass `ref` to
+ * target a non-default branch, and the previous `sha` to update safely —
+ * a lost race throws VaultConflictError, a missing branch throws
+ * VaultMissingRefError (bootstrap it with ensureVaultBranch).
+ */
+export async function putVaultText(
+  path: string,
+  content: string,
+  opts: { ref?: string; sha?: string; message: string }
+): Promise<string> {
+  const cfg = config;
+  if (!cfg) throw new Error("Vault not connected.");
+  const body: Record<string, unknown> = {
+    message: opts.message,
+    content: utf8ToBase64(content),
+  };
+  if (opts.sha) body.sha = opts.sha;
+  if (opts.ref) body.branch = opts.ref;
+  const res = await gh(`/repos/${cfg.repo}/contents/${encodePath(path)}`, {
+    token: cfg.token,
+    method: "PUT",
+    body,
+  });
+  if (res.status === 409) throw new VaultConflictError();
+  if (res.status === 404) throw new VaultMissingRefError();
+  if (!res.ok) throw new Error(await responseError(res));
+  const data = (await res.json()) as { content?: { sha?: string } };
+  return data.content?.sha ?? "";
+}
+
+/**
+ * Creates a branch off the vault's default branch if it doesn't exist yet
+ * (422 "already exists" from a race is treated as success).
+ */
+export async function ensureVaultBranch(ref: string): Promise<void> {
+  const cfg = config;
+  if (!cfg) throw new Error("Vault not connected.");
+  const existing = await gh(
+    `/repos/${cfg.repo}/git/ref/heads/${encodeURIComponent(ref)}`,
+    { token: cfg.token }
+  );
+  if (existing.ok) return;
+  if (existing.status !== 404) throw new Error(await responseError(existing));
+
+  const repoRes = await gh(`/repos/${cfg.repo}`, { token: cfg.token });
+  if (!repoRes.ok) throw new Error(await responseError(repoRes));
+  const base =
+    ((await repoRes.json()) as { default_branch?: string }).default_branch ||
+    "main";
+  const headRes = await gh(
+    `/repos/${cfg.repo}/git/ref/heads/${encodeURIComponent(base)}`,
+    { token: cfg.token }
+  );
+  if (!headRes.ok) throw new Error(await responseError(headRes));
+  const sha = ((await headRes.json()) as { object?: { sha?: string } }).object
+    ?.sha;
+  if (!sha) throw new Error("Could not resolve the vault's default branch.");
+
+  const create = await gh(`/repos/${cfg.repo}/git/refs`, {
+    token: cfg.token,
+    method: "POST",
+    body: { ref: `refs/heads/${ref}`, sha },
+  });
+  if (!create.ok && create.status !== 422) {
+    throw new Error(await responseError(create));
+  }
+}
+
 /**
  * Adds deploy watching to an existing connection without re-entering the
  * vault token: validates the Leaf repo with the watch token, then rewrites

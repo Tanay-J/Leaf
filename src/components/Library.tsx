@@ -167,16 +167,18 @@ export default function Library({ theme, onCycleTheme }: Props) {
 
   /* Browse renders the vault-published catalog, falling back to the static
      src/books.ts list until books/catalog.json is available. */
-  const source = tab === "mine" ? books : catalog;
   const mineIds = useMemo(() => new Set(books.map((b) => b.id)), [books]);
 
-  const filtered = useMemo(() => {
+  /* Per-tab, query-filtered lists — each tab badge shows its own live count
+     (previously the trailing badge always mirrored whichever tab was open). */
+  const catalogFiltered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return source;
-    return source.filter((b) =>
-      `${b.title} ${b.author ?? ""}`.toLowerCase().includes(q)
-    );
-  }, [query, source]);
+    return q
+      ? catalog.filter((b) =>
+          `${b.title} ${b.author ?? ""}`.toLowerCase().includes(q)
+        )
+      : catalog;
+  }, [query, catalog]);
 
   /* Sort + status filter (status applies to My library only). */
   const [sort, setSort] = useState<string>(() => {
@@ -198,16 +200,24 @@ export default function Library({ theme, onCycleTheme }: Props) {
     "all" | "reading" | "finished" | "unopened"
   >("all");
 
+  const mineFiltered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = q
+      ? books.filter((b) =>
+          `${b.title} ${b.author ?? ""}`.toLowerCase().includes(q)
+        )
+      : books;
+    if (statusFilter === "all") return list;
+    return list.filter((b) => {
+      const p = loadProgress(b.id);
+      if (statusFilter === "finished") return !!p.finishedAt;
+      if (statusFilter === "reading") return !p.finishedAt && !!p.lastReadAt;
+      return !p.lastReadAt && !p.finishedAt; // unopened
+    });
+  }, [books, query, statusFilter]);
+
   const shown = useMemo(() => {
-    let list = filtered;
-    if (tab === "mine" && statusFilter !== "all") {
-      list = list.filter((b) => {
-        const p = loadProgress(b.id);
-        if (statusFilter === "finished") return !!p.finishedAt;
-        if (statusFilter === "reading") return !p.finishedAt && !!p.lastReadAt;
-        return !p.lastReadAt && !p.finishedAt; // unopened
-      });
-    }
+    const list = tab === "mine" ? mineFiltered : catalogFiltered;
     const sorted = [...list];
     sorted.sort((a, b) => {
       if (sort === "title") return a.title.localeCompare(b.title);
@@ -221,7 +231,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
       return ra !== rb ? rb - ra : a.title.localeCompare(b.title);
     });
     return sorted;
-  }, [filtered, sort, statusFilter, tab]);
+  }, [tab, mineFiltered, catalogFiltered, sort]);
 
   /* ---- "Add book" modal state ---- */
   const [showAdd, setShowAdd] = useState(false);
@@ -234,32 +244,39 @@ export default function Library({ theme, onCycleTheme }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-picking the same file later
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow re-picking the same files later
+    if (files.length === 0) return;
     setAddError("");
     setAddBusy(true);
     (async () => {
-      // Duplicate detection: identical content anywhere in the library?
-      const sha = await hashBlob(file);
-      const dupKey = sha ? await findKeyBySha(sha) : null;
-      if (dupKey) {
-        const known = getMyLibrary().find((b) => b.blobKey === dupKey);
-        throw new Error(
-          known
-            ? `Already in your library as “${known.title}”.`
-            : "This file is already in your library."
-        );
+      let added = 0;
+      let skipped = 0;
+      for (const file of files) {
+        // Duplicate detection: identical content anywhere in the library?
+        const sha = await hashBlob(file);
+        const dupKey = sha ? await findKeyBySha(sha) : null;
+        if (dupKey) {
+          skipped++;
+          continue; // already have it — skip in a batch
+        }
+        // Epub cover extraction (title/author come from the filename here).
+        let meta: Awaited<ReturnType<typeof readEpubMeta>> = null;
+        if (/\.epub$/i.test(file.name)) {
+          meta = await readEpubMeta(file);
+        }
+        const { book } = await addLocalBook(file, sha ?? undefined);
+        if (meta?.cover) await saveCover(book.id, meta.cover);
+        added++;
       }
-      // Epub metadata prefill (fills blanks only).
-      let meta: Awaited<ReturnType<typeof readEpubMeta>> = null;
-      if (/\.epub$/i.test(file.name)) {
-        meta = await readEpubMeta(file);
-        if (meta?.title && !addTitle.trim()) setAddTitle(meta.title);
-        if (meta?.author && !addAuthor.trim()) setAddAuthor(meta.author);
+      if (added === 0 && skipped === files.length) {
+        setAddError("Those files are already in your library.");
+        return;
       }
-      const { book } = await addLocalBook(file, sha ?? undefined);
-      if (meta?.cover) await saveCover(book.id, meta.cover);
+      if (added === 0 && files.length === 1) {
+        setAddError("Could not add that file.");
+        return;
+      }
       setAddUrl("");
       setAddTitle("");
       setAddAuthor("");
@@ -268,7 +285,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
     })()
       .catch((err) => {
         setAddError(
-          err instanceof Error ? err.message : "Could not add that file."
+          err instanceof Error ? err.message : "Could not add those files."
         );
       })
       .finally(() => setAddBusy(false));
@@ -371,77 +388,112 @@ export default function Library({ theme, onCycleTheme }: Props) {
     setVaultBusy(false);
   };
 
-  const startVaultUpload = async (file: File) => {
+  /** Uploads one file to the vault without waiting on the deploy. */
+  const uploadOneToVault = async (
+    file: File
+  ): Promise<{ fileName: string; note: string; cover?: Blob } | null> => {
+    // Epub metadata prefill so vault uploads carry title/author for CI.
+    let title = "";
+    let author = "";
+    let cover: Blob | undefined;
+    if (/\.epub$/i.test(file.name)) {
+      const meta = await readEpubMeta(file).catch(() => null);
+      title = meta?.title ?? "";
+      author = meta?.author ?? "";
+      cover = meta?.cover;
+    }
+    const res = await uploadToVault(
+      file,
+      { title, author },
+      (pct) => setVaultPct(pct)
+    );
+    if (!res.ok) throw new Error(res.error);
+    if (res.skipped) return null;
+    return {
+      fileName: res.fileName,
+      cover,
+      note:
+        (res.replaced
+          ? `Replaced “${res.fileName}”.`
+          : `Uploaded “${res.fileName}”.`) +
+        (res.metaWarning ? ` ${res.metaWarning}` : ""),
+    };
+  };
+
+  /** Uploads one or many files to the vault, waits for the deploy once, and
+   *  pins every book that shows up in the freshly-published catalog. */
+  const startVaultUploads = async (files: File[]) => {
     setAddError("");
     setVaultNote("");
     setAddBusy(false);
     setVaultBusy(true);
-    setVaultPhase("upload");
-    setVaultPct(0);
-    const startedAt = Date.now();
+    const deployStartedAt = Date.now();
     try {
-      // Epub metadata prefill so vault uploads carry title/author for CI.
-      let title = addTitle;
-      let author = addAuthor;
-      let cover: Blob | undefined;
-      if (/\.epub$/i.test(file.name)) {
-        const meta = await readEpubMeta(file).catch(() => null);
-        if (meta?.title && !title) {
-          title = meta.title;
-          setAddTitle(meta.title);
+      setVaultPhase("upload");
+      const uploaded: { fileName: string; note: string; cover?: Blob }[] = [];
+      for (let i = 0; i < files.length; i++) {
+        setVaultPct(0);
+        if (files.length > 1) {
+          setVaultNote(`Uploading ${i + 1} of ${files.length} to the vault…`);
         }
-        if (meta?.author && !author) {
-          author = meta.author;
-          setAddAuthor(meta.author);
-        }
-        cover = meta?.cover;
+        const done = await uploadOneToVault(files[i]);
+        if (done) uploaded.push(done);
       }
-      const res = await uploadToVault(
-        file,
-        { title, author },
-        (pct) => setVaultPct(pct)
-      );
-      if (!res.ok) {
-        setAddError(res.error);
-        return;
-      }
-      if (res.skipped) {
+      if (uploaded.length === 0) {
         setVaultNote(
-          "That file is already in the vault (same name and size) — nothing to upload." +
-            (res.metaWarning ? ` ${res.metaWarning}` : "")
+          files.length > 1
+            ? "Those files are already in the vault (same name and size) — nothing to upload."
+            : "That file is already in the vault (same name and size) — nothing to upload."
         );
         return;
       }
-      let note = res.replaced
-        ? `Replaced “${res.fileName}” in the vault.`
-        : `Uploaded “${res.fileName}” to the vault.`;
-      if (res.metaWarning) note += ` ${res.metaWarning}`;
 
+      // One deploy-watch for the whole batch, then a cache-busted catalog
+      // reload — the catalog is the source of truth for “is it live yet”.
       setVaultPhase("deploy");
+      const note = uploaded.map((u) => u.note).join(" ");
       if (canWatchDeploys()) {
-        const watch = await waitForDeploy(startedAt);
-        if (watch.conclusion === "success") {
-          const fresh = await reloadCatalog();
-          setCatalog(fresh);
-          const added = fresh.find((b) => b.url === `books/${res.fileName}`);
-          if (added) {
-            pinBook(added);
-            if (cover) await saveCover(added.id, cover);
-            setTab("browse");
-          }
-          note += added
-            ? " It’s live and pinned to My library."
-            : " It’s live under Browse.";
-        } else if (watch.conclusion) {
-          note += ` But the deploy failed (${watch.conclusion}) — check the Actions tab.`;
-        } else if (watch.error) {
-          note += ` ${watch.error}`;
+        const watch = await waitForDeploy(deployStartedAt);
+        const fresh = await reloadCatalog();
+        setCatalog(fresh);
+        const arrived = fresh.filter((b) =>
+          uploaded.some((u) => b.url === `books/${u.fileName}`)
+        );
+        for (const b of arrived) {
+          pinBook(b);
+          const cover = uploaded.find(
+            (u) => b.url === `books/${u.fileName}`
+          )?.cover;
+          if (cover) await saveCover(b.id, cover).catch(() => {});
         }
+        if (arrived.length > 0) {
+          setTab("browse");
+          setVaultNote(
+            `${note} ${arrived.length === 1 ? "It’s live and pinned" : "They’re live and pinned"} to My library.`
+          );
+          return;
+        }
+        if (watch.conclusion === "success") {
+          // Watch says done but the book isn't in the catalog yet — the CDN
+          // can briefly lag the payload; it'll show up (or on the next visit).
+          setVaultNote(note + " The deploy finished — the book appears under Browse shortly.");
+          return;
+        }
+        setVaultNote(
+          note +
+            (watch.conclusion
+              ? ` But the deploy failed (${watch.conclusion}) — check the Actions tab.`
+              : watch.error
+                ? ` ${watch.error}`
+                : " It appears under Browse once the deploy finishes (a few minutes).")
+        );
       } else {
-        note +=
-          " It appears under Browse once the deploy finishes (a few minutes).";
+        setVaultNote(
+          note + " It appears under Browse once the deploy finishes (a few minutes)."
+        );
       }
-      setVaultNote(note);
+    } catch (err) {
+      setVaultNote(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setVaultPhase(null);
       setVaultPct(0);
@@ -450,10 +502,10 @@ export default function Library({ theme, onCycleTheme }: Props) {
   };
 
   const onVaultFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-picking the same file later
-    if (!file) return;
-    void startVaultUpload(file);
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow re-picking the same files later
+    if (files.length === 0) return;
+    void startVaultUploads(files);
   };
 
   const enableWatch = async () => {
@@ -555,6 +607,7 @@ return (
           >
             <BookOpen size={14} />
             My library
+            <span className="tab-count">{mineFiltered.length}</span>
           </button>
           <button
             role="tab"
@@ -565,8 +618,8 @@ return (
           >
             <Compass size={14} />
             Browse
+            <span className="tab-count">{catalogFiltered.length}</span>
           </button>
-          <span className="tab-count">{shown.length}</span>
         </div>
 
         <div className="library-controls">
@@ -902,13 +955,14 @@ return (
                 ref={fileRef}
                 type="file"
                 accept=".epub,.pdf"
+                multiple
                 onChange={onFilePicked}
                 disabled={addBusy || vaultBusy}
               />
               <FolderOpen size={16} />
               {addBusy
                 ? "Saving to this browser…"
-                : "Choose an EPUB or PDF from this device"}
+                : "Choose EPUB/PDF files from this device"}
             </label>
             <p className="modal-hint">
               Files you pick are stored in this browser only — nothing is
@@ -926,6 +980,7 @@ return (
                     ref={vaultFileRef}
                     type="file"
                     accept=".epub,.pdf"
+                    multiple
                     onChange={onVaultFilePicked}
                     disabled={vaultBusy || addBusy}
                   />
@@ -938,7 +993,7 @@ return (
                     ? `Uploading ${vaultPct}%`
                     : vaultPhase === "deploy"
                       ? "Deploying…"
-                      : "Choose an EPUB or PDF to upload to your vault"}
+                      : "Choose EPUB/PDF files to upload to your vault"}
                 </label>
                 {vaultPhase === "upload" && (
                   <div className="vault-progress" aria-hidden="true">

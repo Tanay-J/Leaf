@@ -186,26 +186,30 @@ export function getCatalog(): Book[] {
   return catalogCache ?? BOOKS;
 }
 
-/** Fetches books/catalog.json once per session and caches the result. */
-export async function loadCatalog(): Promise<Book[]> {
-  if (catalogCache) return catalogCache;
+/** Fetches books/catalog.json once per session and caches the result.
+ *  Pass force to skip the cache and bust the CDN/browser cache (used right
+ *  after a vault deploy so the just-published book actually appears). */
+export async function loadCatalog(force = false): Promise<Book[]> {
+  if (catalogCache && !force) return catalogCache;
   try {
-    const res = await fetch("books/catalog.json");
+    const url = force
+      ? `books/catalog.json?v=${Date.now()}` // cache-buster for staleness
+      : "books/catalog.json";
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status} for books/catalog.json`);
     catalogCache = parseCatalog(await res.json());
   } catch {
-    catalogCache = BOOKS; // dev server / vault checkout failed — fallback
+    if (!catalogCache) catalogCache = BOOKS;
+    // keep the existing cache on a failed force-refresh (transient network)
   }
   return catalogCache;
 }
 
-/**
- * Re-fetches books/catalog.json — used after a vault upload finishes its
- * deploy so the new book appears without a full page reload.
- */
+/** Re-fetches books/catalog.json — used after a vault upload finishes its
+ *  deploy so the new book appears without a full page reload. */
 export async function reloadCatalog(): Promise<Book[]> {
   catalogCache = null;
-  return loadCatalog();
+  return loadCatalog(true);
 }
 
 function parseCatalog(raw: unknown): Book[] {

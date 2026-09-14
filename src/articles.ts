@@ -12,6 +12,12 @@ export interface SavedArticle {
   addedAt: number;
   /** Timestamp of last read; null while still unread. */
   readAt: number | null;
+  /** Timestamp when starred; null while unstarred. */
+  starredAt?: number | null;
+  /** Timestamp when archived; null while in the active list. */
+  archivedAt?: number | null;
+  /** User tags, lowercase and trimmed. */
+  tags?: string[];
   /** Last time any field changed; drives sync merge conflicts. */
   updatedAt: number;
   /** Tombstone for cross-device deletes; null while the row is live. */
@@ -33,6 +39,9 @@ function makeId(): string {
 function normalize(a: SavedArticle): SavedArticle {
   return {
     ...a,
+    starredAt: a.starredAt ?? null,
+    archivedAt: a.archivedAt ?? null,
+    tags: Array.isArray(a.tags) ? a.tags : [],
     updatedAt: a.updatedAt ?? a.addedAt,
     removedAt: a.removedAt ?? null,
   };
@@ -176,6 +185,47 @@ export function setArticleRead(id: string, read: boolean): void {
             updatedAt: now,
           }
         : a
+    )
+  );
+}
+
+/** Star / unstar an article. */
+export function setArticleStar(id: string, starred: boolean): void {
+  const now = Date.now();
+  persist(
+    loadRawArticles().map((a) =>
+      a.id === id
+        ? { ...a, starredAt: starred ? (a.starredAt ?? now) : null, updatedAt: now }
+        : a
+    )
+  );
+}
+
+/** Archive / unarchive an article (hidden from the active list while archived). */
+export function setArticleArchived(id: string, archived: boolean): void {
+  const now = Date.now();
+  persist(
+    loadRawArticles().map((a) =>
+      a.id === id
+        ? {
+            ...a,
+            archivedAt: archived ? (a.archivedAt ?? now) : null,
+            updatedAt: now,
+          }
+        : a
+    )
+  );
+}
+
+/** Replaces an article's tag list (lowercased, deduped, non-empty). */
+export function setArticleTags(id: string, tags: string[]): void {
+  const now = Date.now();
+  const clean = Array.from(
+    new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))
+  ).slice(0, 10);
+  persist(
+    loadRawArticles().map((a) =>
+      a.id === id ? { ...a, tags: clean, updatedAt: now } : a
     )
   );
 }

@@ -4,6 +4,8 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { setArticleRead, updateArticleTitle, type SavedArticle } from "../articles";
 import { navigate, type Theme } from "../lib";
+import { loadArticleContent, saveArticleContent } from "../localBooks";
+import { ARTICLE_DEFAULT_LINE_HEIGHT, FONT_OPTIONS, LINE_HEIGHT_OPTIONS, DEFAULT_SPACING_ID, fontStackFor, spacingValueFor } from "../typography";
 import ThemeButton from "./ThemeButton";
 
 interface Props {
@@ -13,6 +15,8 @@ interface Props {
 }
 
 const FONT_KEY = "article-font";
+const FONT_FAMILY_KEY = "article-font-family";
+const SPACING_KEY = "article-line-height";
 
 function loadFont(): number {
   try {
@@ -22,6 +26,24 @@ function loadFont(): number {
     /* private mode */
   }
   return 100;
+}
+
+function loadFontFamily(): string {
+  try {
+    return localStorage.getItem(FONT_FAMILY_KEY) ?? "";
+  } catch {
+    /* private mode */
+    return "";
+  }
+}
+
+function loadSpacingId(): string {
+  try {
+    return localStorage.getItem(SPACING_KEY) ?? DEFAULT_SPACING_ID;
+  } catch {
+    /* private mode */
+    return DEFAULT_SPACING_ID;
+  }
 }
 
 /**
@@ -36,6 +58,8 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
   const [errorText, setErrorText] = useState("");
   const [fetchedTitle, setFetchedTitle] = useState<string | null>(null);
   const [font, setFont] = useState<number>(loadFont);
+  const [fontFamily, setFontFamily] = useState<string>(loadFontFamily);
+  const [spacingId, setSpacingId] = useState<string>(loadSpacingId);
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
@@ -46,6 +70,24 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
     setHtml("");
     setFetchedTitle(null);
 
+    const render = (md: string): void => {
+      const rendered = marked.parse(md) as string;
+      setHtml(DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } }));
+    };
+
+    /* Stale-while-revalidate: show the cached copy immediately (offline
+       friendly), then refresh from the source in the background. */
+    let hadCache = false;
+    void loadArticleContent(article.id)
+      .then((cached) => {
+        if (disposed || !cached) return;
+        hadCache = true;
+        render(cached);
+        setStatus("ready");
+        setArticleRead(article.id, true);
+      })
+      .catch(() => {});
+
     (async () => {
       try {
         const res = await fetch(`https://r.jina.ai/${article.url}`, {
@@ -54,10 +96,10 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const md = await res.text();
         if (disposed) return;
-        const rendered = marked.parse(md) as string;
-        setHtml(DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } }));
+        render(md);
         setStatus("ready");
         setArticleRead(article.id, true);
+        void saveArticleContent(article.id, md).catch(() => {});
         const heading = /^#\s+(.+)$/m.exec(md.slice(0, 4000))?.[1];
         if (heading?.trim()) {
           setFetchedTitle(heading.trim());
@@ -65,6 +107,8 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
         }
       } catch (err) {
         if (disposed || controller.signal.aborted) return;
+        // A cached copy beats an error page.
+        if (hadCache) return;
         setErrorText(err instanceof Error ? err.message : String(err));
         setStatus("error");
       }
@@ -86,6 +130,24 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
       }
       return next;
     });
+  }
+
+  function changeFontFamily(id: string): void {
+    setFontFamily(id);
+    try {
+      localStorage.setItem(FONT_FAMILY_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function changeSpacing(id: string): void {
+    setSpacingId(id);
+    try {
+      localStorage.setItem(SPACING_KEY, id);
+    } catch {
+      /* ignore */
+    }
   }
 
   const title = fetchedTitle ?? article.title;
@@ -113,6 +175,30 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
           >
             <ExternalLink size={15} />
           </a>
+          <select
+            className="control-select"
+            value={fontFamily}
+            onChange={(e) => changeFontFamily(e.target.value)}
+            title="Font style"
+          >
+            {FONT_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="control-select"
+            value={spacingId}
+            onChange={(e) => changeSpacing(e.target.value)}
+            title="Line spacing"
+          >
+            {LINE_HEIGHT_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <button className="mini-btn" onClick={() => changeFont(-10)} title="Smaller text">
             <Minus size={14} />
           </button>
@@ -156,7 +242,11 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
           <div className="article-scroll">
             <div
               className="article-prose"
-              style={{ fontSize: `${font}%` }}
+              style={{
+                fontSize: `${font}%`,
+                fontFamily: fontStackFor(fontFamily),
+                lineHeight: spacingValueFor(spacingId) ?? ARTICLE_DEFAULT_LINE_HEIGHT,
+              }}
               dangerouslySetInnerHTML={{ __html: html }}
             />
             <p className="article-source">

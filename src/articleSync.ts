@@ -273,8 +273,8 @@ function mergePair(l: SavedArticle, r: SavedArticle): SavedArticle {
     };
   }
 
-  // Both live — keep the earliest add (stable id), latest read, and the title
-  // from whichever side was touched last.
+  // Both live — keep the earliest add (stable id), latest read, and the
+  // starred/archived/tags state from whichever side was touched last.
   return {
     id: l.addedAt <= r.addedAt ? l.id : r.id,
     url: r.url,
@@ -282,6 +282,11 @@ function mergePair(l: SavedArticle, r: SavedArticle): SavedArticle {
     domain: l.domain || r.domain || domainOf(r.url),
     addedAt: Math.min(l.addedAt, r.addedAt),
     readAt: l.readAt != null ? l.readAt : r.readAt,
+    starredAt:
+      (lTouched >= rTouched ? l.starredAt : r.starredAt) ?? null,
+    archivedAt:
+      (lTouched >= rTouched ? l.archivedAt : r.archivedAt) ?? null,
+    tags: lTouched >= rTouched ? (l.tags ?? []) : (r.tags ?? []),
     updatedAt: Math.max(lTouched, rTouched),
     removedAt: null,
   };

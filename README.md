@@ -18,13 +18,18 @@ catalog that ships with Leaf.
   its stored copy. You can also **upload a file to your vault** — it's
   published on every device after the deploy (see below).
 - **Find a book** — search by title or author (scoped to whichever tab you're
-  on), or switch between grid and list views.
+  on), switch between grid and list views, sort by recent/title/author/
+  progress, and filter My library by status (reading / finished / unopened).
 - **Open a book** — click any card to start reading.
+- **Book details** — the ⓘ button on any card opens a detail page with the
+  cover, reading status, progress, and time spent with that book.
 - **Resume reading** — every book remembers the page or chapter you were on.
   With your vault connected, your place, pins, and "finished" marks follow
   you across devices automatically.
 - **Reading stats** — My library quietly shows how many books you've
-  finished, how many you're reading, and your current reading streak.
+  finished, how many you're reading, and your current reading streak. Open
+  **view stats** for the full dashboard: a six-month heatmap of your reading
+  time, longest streak, and weekly totals.
 
 ## Adding books to the site
 
@@ -66,8 +71,12 @@ they never leave your browser.
 **EPUB**
 - Turn pages with the **Prev / Next** buttons or the **← / → arrow keys**.
 - Use the **Contents** panel to jump to any chapter.
-- Adjust **font size** and choose a **font style** (default, serif, book,
-  sans) from the toolbar.
+- **Search** — the magnifier in the reader toolbar searches inside the book
+  (EPUBs and PDFs); click a result to jump to that chapter or page.
+- Adjust **font size**, choose a **font style** (default, Literata, Georgia,
+  Palatino, Baskerville, Charter, or a sans-serif), and set the **line
+  spacing** (tight → wide) from the toolbar. Your choices are remembered
+  per book and follow you across devices with the vault connected.
 
 **PDF**
 - **Zoom in / out** to fit the page width you prefer.
@@ -84,10 +93,14 @@ books.
 - **Add an article** — paste a link at the top of the page, or drag the
   **Save to Leaf** bookmark to your browser’s bookmarks bar; clicking it on
   any website saves that page instantly.
-- **Read** — tap an article. Use the **− / +** buttons to change the text size
-  and **Open original** to see it on the source site. Opening an article marks
+- **Read** — tap an article. Use the **− / +** buttons to change the text size,
+  the dropdowns for **font style** and **line spacing**, and **Open original**
+  to see it on the source site. Opening an article marks
   it as read (the unread dot clears).
 - **Remove** — use the trash icon on any row.
+- **Organize** — star favorites, archive finished items, and add tags; the
+  chips at the top filter the list. Articles you open are cached in your
+  browser, so re-reading works offline.
 
 Articles stay in your browser, just like reading progress.
 
@@ -124,3 +137,8 @@ eyes at night, and your choice is remembered.
 
 Everything — reading progress, font preferences, and the theme — stays in
 your browser. Nothing is uploaded or shared.
+
+The **Sync & backup** card at the bottom of My library shows the status of
+every sync (vault, progress & pins, reading list) and can **export** your
+whole library as a JSON backup — settings, progress, pins, and stats — or
+restore one. GitHub tokens are never included in a backup.

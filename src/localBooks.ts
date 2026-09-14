@@ -11,10 +11,11 @@
  */
 
 const DB_NAME = "leaf";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "books";
 const COVER_STORE = "covers";
 const META_STORE = "meta";
+const ARTICLE_STORE = "article-content";
 
 export interface BookMeta {
   sha256: string;
@@ -36,6 +37,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(META_STORE)) {
         db.createObjectStore(META_STORE);
+      }
+      if (!db.objectStoreNames.contains(ARTICLE_STORE)) {
+        db.createObjectStore(ARTICLE_STORE);
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -132,6 +136,28 @@ export function loadCover(id: string): Promise<Blob | null> {
 
 export function deleteCover(id: string): Promise<void> {
   return withStore<void>(COVER_STORE, "readwrite", (store) =>
+    store.delete(id) as unknown as IDBRequest<void>
+  );
+}
+
+/* ---------- article content cache ---------- */
+
+/** Persists a fetched article's markdown so re-reads work offline. */
+export function saveArticleContent(id: string, markdown: string): Promise<void> {
+  return withStore<void>(ARTICLE_STORE, "readwrite", (store) =>
+    store.put(markdown, id) as unknown as IDBRequest<void>
+  );
+}
+
+/** Loads the cached markdown for an article; null when never cached. */
+export function loadArticleContent(id: string): Promise<string | null> {
+  return withStore<string | undefined>(ARTICLE_STORE, "readonly", (store) =>
+    store.get(id) as IDBRequest<string | undefined>
+  ).then((md) => (typeof md === "string" ? md : null));
+}
+
+export function deleteArticleContent(id: string): Promise<void> {
+  return withStore<void>(ARTICLE_STORE, "readwrite", (store) =>
     store.delete(id) as unknown as IDBRequest<void>
   );
 }

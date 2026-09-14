@@ -13,6 +13,7 @@ import {
   Compass,
   FileText,
   FolderOpen,
+  Info,
   LayoutGrid,
   List,
   Loader2,
@@ -26,6 +27,7 @@ import { getCatalog, loadCatalog, reloadCatalog, type Book } from "../books";
 import { loadArticles } from "../articles";
 import { loadAllProgress, loadProgress, navigate, readDays, useLibraryView, type Theme } from "../lib";
 import ThemeButton from "./ThemeButton";
+import SyncCard from "./SyncCard";
 import { findKeyBySha, hashBlob, loadCover, saveCover } from "../localBooks";
 import { readEpubMeta } from "../epubMeta";
 import {
@@ -53,8 +55,17 @@ import {
 
 function progressInfo(book: Book): { label: string; pct: number | null } {
   const p = loadProgress(book.id);
+  if (p.finishedAt) return { label: "Finished", pct: 1 };
   if (book.type === "pdf" && p.page && p.total) {
     return { label: `Page ${p.page} of ${p.total}`, pct: p.page / p.total };
+  }
+  // EPUBs store their position as 0..1 (see EpubReader) — show a %.
+  if (book.type === "epub" && p.pct != null) {
+    const pctLabel = `${Math.round(p.pct * 100)}%`;
+    return {
+      label: p.chapter ? `${pctLabel} · ${p.chapter}` : `${pctLabel} read`,
+      pct: p.pct,
+    };
   }
   if (book.type === "epub" && (p.cfi || p.chapter)) {
     return { label: p.chapter ? `Resume: ${p.chapter}` : "Started", pct: null };
@@ -166,6 +177,51 @@ export default function Library({ theme, onCycleTheme }: Props) {
       `${b.title} ${b.author ?? ""}`.toLowerCase().includes(q)
     );
   }, [query, source]);
+
+  /* Sort + status filter (status applies to My library only). */
+  const [sort, setSort] = useState<string>(() => {
+    try {
+      const s = localStorage.getItem("library-sort");
+      return s === "title" || s === "author" || s === "progress" ? s : "recent";
+    } catch {
+      return "recent";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("library-sort", sort);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [sort]);
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "reading" | "finished" | "unopened"
+  >("all");
+
+  const shown = useMemo(() => {
+    let list = filtered;
+    if (tab === "mine" && statusFilter !== "all") {
+      list = list.filter((b) => {
+        const p = loadProgress(b.id);
+        if (statusFilter === "finished") return !!p.finishedAt;
+        if (statusFilter === "reading") return !p.finishedAt && !!p.lastReadAt;
+        return !p.lastReadAt && !p.finishedAt; // unopened
+      });
+    }
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      if (sort === "title") return a.title.localeCompare(b.title);
+      if (sort === "author")
+        return (a.author ?? "\uffff").localeCompare(b.author ?? "\uffff");
+      if (sort === "progress")
+        return (progressInfo(b).pct ?? -1) - (progressInfo(a).pct ?? -1);
+      // recent: last opened first, then plain alphabetical
+      const ra = loadProgress(a.id).lastReadAt ?? 0;
+      const rb = loadProgress(b.id).lastReadAt ?? 0;
+      return ra !== rb ? rb - ra : a.title.localeCompare(b.title);
+    });
+    return sorted;
+  }, [filtered, sort, statusFilter, tab]);
 
   /* ---- "Add book" modal state ---- */
   const [showAdd, setShowAdd] = useState(false);
@@ -479,6 +535,13 @@ return (
           <p className="reading-stats">
             {stats.finished} finished · {stats.inProgress} in progress
             {stats.streak > 1 ? ` · 🔥 ${stats.streak}-day streak` : ""}
+            <button
+              className="link-btn stats-link"
+              onClick={() => navigate("#/stats")}
+              title="Open the full stats dashboard"
+            >
+              view stats
+            </button>
           </p>
         )}
 
@@ -503,10 +566,44 @@ return (
             <Compass size={14} />
             Browse
           </button>
-          <span className="tab-count">{filtered.length}</span>
+          <span className="tab-count">{shown.length}</span>
         </div>
 
-        {filtered.length === 0 ? (
+        <div className="library-controls">
+          {tab === "mine" && (
+            <div className="filter-chips">
+              {(["all", "reading", "finished", "unopened"] as const).map((f) => (
+                <button
+                  key={f}
+                  className={`filter-chip${statusFilter === f ? " active" : ""}`}
+                  onClick={() => setStatusFilter(f)}
+                >
+                  {f === "all"
+                    ? "All"
+                    : f === "reading"
+                      ? "Reading"
+                      : f === "finished"
+                        ? "Finished"
+                        : "Unopened"}
+                </button>
+              ))}
+            </div>
+          )}
+          <select
+            className="control-select sort-select"
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+            title="Sort order"
+            aria-label="Sort order"
+          >
+            <option value="recent">Sort: Recent</option>
+            <option value="title">Sort: Title</option>
+            <option value="author">Sort: Author</option>
+            <option value="progress">Sort: Progress</option>
+          </select>
+        </div>
+
+        {shown.length === 0 ? (
           <div className="empty-state">
             <BookOpen size={28} />
             <p>
@@ -537,9 +634,10 @@ return (
           </div>
         ) : view === "grid" ? (
           <div className="book-grid">
-            {filtered.map((b) => {
+            {shown.map((b) => {
               const prog = progressInfo(b);
               const isMine = mineIds.has(b.id);
+              const coverSrc = covers[b.id] ?? b.cover ?? null;
               return (
                 <div className="book-card-wrap" key={b.id}>
                   <button
@@ -549,10 +647,10 @@ return (
                     }
                   >
                     <div className="book-cover">
-                      {covers[b.id] ? (
+                      {coverSrc ? (
                         <img
                           className="book-cover-img"
-                          src={covers[b.id]}
+                          src={coverSrc}
                           alt=""
                         />
                       ) : b.type === "epub" ? (
@@ -587,6 +685,16 @@ return (
                         </div>
                       )}
                     </div>
+                  </button>
+                  <button
+                    className="card-remove card-info"
+                    onClick={() =>
+                      navigate(`#/detail/${encodeURIComponent(b.id)}`)
+                    }
+                    title="Book details"
+                    aria-label={`Details for ${b.title}`}
+                  >
+                    <Info size={14} />
                   </button>
                   {tab === "mine" ? (
                     isMine && (
@@ -624,7 +732,7 @@ return (
           </div>
         ) : (
 <div className="book-list">
-            {filtered.map((b) => {
+            {shown.map((b) => {
               const prog = progressInfo(b);
               const isMine = mineIds.has(b.id);
               return (
@@ -659,6 +767,16 @@ return (
                       {b.type}
                     </span>
                     {isMine && <span className="book-list-yours">Yours</span>}
+                  </button>
+                  <button
+                    className="mini-btn card-info-list"
+                    onClick={() =>
+                      navigate(`#/detail/${encodeURIComponent(b.id)}`)
+                    }
+                    title="Book details"
+                    aria-label={`Details for ${b.title}`}
+                  >
+                    <Info size={14} />
                   </button>
                   {tab === "mine" ? (
                     isMine && (
@@ -700,6 +818,8 @@ return (
             ? "Your picks are kept in this browser. Open Browse to pull more in from the built-in catalog."
             : "The catalog shipped with Leaf — “Yours” marks what you’ve collected. Click the toggle on any card to add or remove it."}
         </p>
+
+        <SyncCard />
       </main>
 
       {showAdd && (

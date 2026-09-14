@@ -15,6 +15,8 @@ export interface Book {
   author?: string;
   type: "epub" | "pdf";
   url: string;
+  /** Cover image path under books/covers/ (extracted at deploy time). */
+  cover?: string;
 }
 
 export const BOOKS: Book[] = [
@@ -227,6 +229,11 @@ function parseCatalog(raw: unknown): Book[] {
       type,
       url,
       ...(typeof e.author === "string" && e.author ? { author: e.author } : {}),
+      ...(typeof e.cover === "string" &&
+      e.cover.startsWith("books/covers/") &&
+      !e.cover.includes("..")
+        ? { cover: e.cover }
+        : {}),
     });
   }
   return books.length > 0 ? books : BOOKS;

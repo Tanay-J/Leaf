@@ -9,6 +9,8 @@ import { initSync } from "./articleSync";
 import { initStateSync } from "./stateSync";
 import { findBook } from "./userBooks";
 import { loadCatalog } from "./books";
+import BookDetail from "./components/BookDetail";
+import Stats from "./components/Stats";
 
 export default function App() {
   const route = useHashRoute();
@@ -61,6 +63,14 @@ export default function App() {
     return findBook(id) ?? null;
   }, [parsed, catalogTick]);
 
+  /* "#/detail/<id>" — the info page for a book (cover, status, stats). */
+  const detailBook = useMemo(() => {
+    const prefix = "#/detail/";
+    if (!parsed.path.startsWith(prefix)) return null;
+    const id = decodeURIComponent(parsed.path.slice(prefix.length));
+    return findBook(id) ?? null;
+  }, [parsed, catalogTick]);
+
   const articleId = useMemo(() => {
     const prefix = "#/article/";
     if (!parsed.path.startsWith(prefix)) return null;
@@ -71,6 +81,14 @@ export default function App() {
 
   if (book) {
     return <Reader key={book.id} book={book} {...shared} />;
+  }
+
+  if (detailBook) {
+    return <BookDetail key={detailBook.id} book={detailBook} {...shared} />;
+  }
+
+  if (parsed.path === "#/stats") {
+    return <Stats {...shared} />;
   }
 
   if (articleId) {

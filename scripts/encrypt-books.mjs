@@ -21,8 +21,9 @@
  * In CI there is no TTY — a missing env var fails the build ON PURPOSE so
  * plaintext books can never reach GitHub Pages.
  */
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { inflateRawSync } from "node:zlib";
 
 const PBKDF2_ITERATIONS = 310_000;
 const SALT_BYTES = 16;
@@ -90,6 +91,13 @@ if (entries.length === 0) fail(`No .epub/.pdf files found in ${inDir}`);
 
 await mkdir(outDir, { recursive: true });
 
+/* Fresh covers dir per run so renamed/removed books leave nothing behind. */
+const coversDir = path.join(outDir, "covers");
+await mkdir(coversDir, { recursive: true });
+for (const stale of await readdir(coversDir)) {
+  await unlink(path.join(coversDir, stale)).catch(() => {});
+}
+
 for (const file of entries) {
   const plain = await readFile(path.join(inDir, file));
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
@@ -154,7 +162,128 @@ try {
 }
 
 const usedIds = new Set();
-const catalog = entries.map((file) => {
+
+/* ---- EPUB cover extraction (deploy-time, zero-dependency) ----
+ * EPUBs are zips: parse the central directory, read container.xml to find
+ * the OPF, then take the manifest item flagged as cover-image (or the
+ * <meta name="cover"> fallback). Best-effort — failures just skip covers. */
+
+function findEocd(buf) {
+  const min = Math.max(0, buf.length - 66);
+  for (let i = buf.length - 22; i >= min; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) return i;
+  }
+  return -1;
+}
+
+function listZipEntries(buf) {
+  const eocd = findEocd(buf);
+  if (eocd < 0) return null;
+  const count = buf.readUInt16LE(eocd + 10);
+  let off = buf.readUInt32LE(eocd + 16);
+  const entries = new Map();
+  for (let n = 0; n < count; n++) {
+    if (off + 46 > buf.length || buf.readUInt32LE(off) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(off + 10);
+    const csize = buf.readUInt32LE(off + 20);
+    const nameLen = buf.readUInt16LE(off + 28);
+    const extraLen = buf.readUInt16LE(off + 30);
+    const commentLen = buf.readUInt16LE(off + 32);
+    const localOff = buf.readUInt32LE(off + 42);
+    const name = buf.toString("utf8", off + 46, off + 46 + nameLen);
+    entries.set(name, { method, csize, localOff });
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries.size > 0 ? entries : null;
+}
+
+function readZipEntry(buf, entry) {
+  const { method, csize, localOff } = entry;
+  const nameLen = buf.readUInt16LE(localOff + 26);
+  const extraLen = buf.readUInt16LE(localOff + 28);
+  const start = localOff + 30 + nameLen + extraLen;
+  if (start + csize > buf.length) return null;
+  const data = buf.subarray(start, start + csize);
+  if (method === 0) return data;
+  if (method === 8) {
+    try {
+      return inflateRawSync(data);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function resolveZipPath(base, href) {
+  const parts = [];
+  for (const seg of (base + href.replace(/^\.\//, "")).split("/")) {
+    if (seg === "..") parts.pop();
+    else if (seg && seg !== ".") parts.push(seg);
+  }
+  return parts.join("/");
+}
+
+function extractEpubCover(buf) {
+  try {
+    const zip = listZipEntries(buf);
+    if (!zip) return null;
+    const containerEntry = zip.get("META-INF/container.xml");
+    if (!containerEntry) return null;
+    const container = readZipEntry(buf, containerEntry)?.toString("utf8") ?? "";
+    const rootfile = /full-path="([^"]+)"/.exec(container)?.[1];
+    if (!rootfile) return null;
+    const opfEntry = zip.get(rootfile);
+    if (!opfEntry) return null;
+    const opf = readZipEntry(buf, opfEntry)?.toString("utf8") ?? "";
+    const opfDir = rootfile.includes("/")
+      ? rootfile.slice(0, rootfile.lastIndexOf("/") + 1)
+      : "";
+
+    const items = new Map();
+    for (const m of opf.matchAll(/<item\b[^>]*>/g)) {
+      const tag = m[0];
+      const id = /\bid="([^"]+)"/.exec(tag)?.[1];
+      const href = /\bhref="([^"]+)"/.exec(tag)?.[1];
+      if (id && href) {
+        items.set(id, {
+          href: href.replace(/&amp;/g, "&"),
+          mediaType: /\bmedia-type="([^"]+)"/.exec(tag)?.[1] ?? "",
+          props: /\bproperties="([^"]*)"/.exec(tag)?.[1] ?? "",
+        });
+      }
+    }
+
+    let item = null;
+    for (const it of items.values()) {
+      if (/\bcover-image\b/.test(it.props)) {
+        item = it;
+        break;
+      }
+    }
+    if (!item) {
+      const metaCover =
+        /<meta\b[^>]*name="cover"[^>]*content="([^"]+)"/.exec(opf)?.[1] ??
+        /<meta\b[^>]*content="([^"]+)"[^>]*name="cover"/.exec(opf)?.[1];
+      if (metaCover) item = items.get(metaCover) ?? null;
+    }
+    if (!item) return null;
+
+    const entry = zip.get(resolveZipPath(opfDir, item.href));
+    if (!entry) return null;
+    const data = readZipEntry(buf, entry);
+    if (!data || data.length === 0) return null;
+    const ext = /png/i.test(item.mediaType) || /\.png$/i.test(item.href)
+      ? "png"
+      : "jpg";
+    return { ext, data };
+  } catch {
+    return null;
+  }
+}
+
+const catalog = [];
+for (const file of entries) {
   const ext = path.extname(file).toLowerCase();
   const base = file.slice(0, file.length - ext.length);
   const meta = metadata[file] ?? {};
@@ -181,8 +310,21 @@ const catalog = entries.map((file) => {
   if (typeof meta.author === "string" && meta.author.trim()) {
     entry.author = meta.author.trim();
   }
-  return entry;
-});
+
+  // Cover: extracted from the plaintext epub before it's turned away,
+  // written unencrypted under covers/ (covers are as public as the
+  // title/author metadata already published in catalog.json).
+  if (ext === ".epub") {
+    const found = extractEpubCover(await readFile(path.join(inDir, file)));
+    if (found) {
+      const name = `${id}.${found.ext}`;
+      await writeFile(path.join(coversDir, name), found.data);
+      entry.cover = `books/covers/${name}`;
+    }
+  }
+
+  catalog.push(entry);
+}
 
 await writeFile(
   path.join(outDir, "catalog.json"),

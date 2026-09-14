@@ -116,8 +116,12 @@ export interface BookProgress {
   chapter?: string;
   fontSize?: number;
   fontFamily?: string;
+  /** Line-spacing multiplier applied in the reader (undefined = book's own). */
+  lineHeight?: number;
   page?: number;
   total?: number;
+  /** Reading position as 0..1 (EPUBs; PDFs derive it from page/total). */
+  pct?: number;
   zoom?: number;
   /** Last time the position itself moved (not a font tweak) — sync LWW. */
   lastReadAt?: number | null;
@@ -231,6 +235,75 @@ export function replaceReadDays(map: Record<string, boolean>): void {
       READ_DAYS_KEY,
       JSON.stringify({ ...readDays(), ...map })
     );
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/* ---------- reading time (seconds per day + per book) ---------- */
+
+const READ_SECONDS_KEY = "leaf:read-seconds";
+const BOOK_SECONDS_KEY = "leaf:book-seconds";
+
+/** Fired after a reading-time flush; the stats UI listens to refresh. */
+export const READING_TIME_EVENT = "leaf:reading-time";
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Seconds read per local day (YYYY-MM-DD → seconds). */
+export function readSecondsMap(): Record<string, number> {
+  return readJson<Record<string, number>>(READ_SECONDS_KEY, {});
+}
+
+/** Cumulative seconds per book id. */
+export function bookSecondsMap(): Record<string, number> {
+  return readJson<Record<string, number>>(BOOK_SECONDS_KEY, {});
+}
+
+/**
+ * Adds reading time for the current day and the given book. Deliberately does
+ * NOT fire PROGRESS_SAVED_EVENT — time rides along on the next progress push
+ * instead of triggering one every few seconds while a reader is open.
+ */
+export function addReadingSeconds(bookId: string, seconds: number): void {
+  if (!(seconds > 0)) return;
+  const day = dayKey();
+  try {
+    const perDay = readSecondsMap();
+    perDay[day] = (perDay[day] ?? 0) + seconds;
+    localStorage.setItem(READ_SECONDS_KEY, JSON.stringify(perDay));
+    const perBook = bookSecondsMap();
+    perBook[bookId] = (perBook[bookId] ?? 0) + seconds;
+    localStorage.setItem(BOOK_SECONDS_KEY, JSON.stringify(perBook));
+  } catch {
+    /* storage unavailable */
+  }
+  try {
+    window.dispatchEvent(new CustomEvent(READING_TIME_EVENT));
+  } catch {
+    /* unavailable */
+  }
+}
+
+/**
+ * Max-merges remote per-day seconds into local (clock-skew tolerant) —
+ * used by the state sync engine after a pull.
+ */
+export function replaceReadSeconds(map: Record<string, number>): void {
+  try {
+    const local = readSecondsMap();
+    const merged: Record<string, number> = { ...local };
+    for (const [day, secs] of Object.entries(map)) {
+      merged[day] = Math.max(merged[day] ?? 0, secs ?? 0);
+    }
+    localStorage.setItem(READ_SECONDS_KEY, JSON.stringify(merged));
   } catch {
     /* storage unavailable */
   }

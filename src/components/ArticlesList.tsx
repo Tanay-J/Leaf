@@ -1,18 +1,26 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   BookOpen,
   Link2,
   Loader2,
   Newspaper,
   Plus,
   RefreshCw,
+  Star,
+  Tag,
   Trash2,
   Unplug,
+  X,
 } from "lucide-react";
 import {
   addArticle,
   loadArticles,
   removeArticle,
+  setArticleArchived,
+  setArticleStar,
+  setArticleTags,
   type SavedArticle,
 } from "../articles";
 import {
@@ -58,6 +66,34 @@ export default function ArticlesList({
   const [error, setError] = useState(
     initialError ? "That doesn’t look like a valid link." : ""
   );
+
+  /* List organization: filter chips + tag focus + inline tag editing. */
+  const [filter, setFilter] = useState<"all" | "unread" | "starred" | "archived">(
+    "all"
+  );
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [tagEditId, setTagEditId] = useState<string | null>(null);
+  const [tagDraft, setTagDraft] = useState("");
+
+  const visible = articles.filter((a) => {
+    if (activeTag && !(a.tags ?? []).includes(activeTag)) return false;
+    if (filter === "archived") return !!a.archivedAt;
+    if (a.archivedAt) return false;
+    if (filter === "unread") return !a.readAt;
+    if (filter === "starred") return !!a.starredAt;
+    return true;
+  });
+
+  const allTags = Array.from(
+    new Set(articles.flatMap((a) => a.tags ?? []))
+  ).sort();
+
+  const commitTags = (a: SavedArticle) => {
+    if (tagEditId === a.id) setArticleTags(a.id, tagDraft.split(","));
+    setTagEditId(null);
+    setTagDraft("");
+    setArticles(loadArticles());
+  };
 
   /* Cross-device sync UI state. */
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(() =>
@@ -183,18 +219,55 @@ export default function ArticlesList({
         </form>
         {error && <p className="article-error">{error}</p>}
 
-        {articles.length === 0 ? (
+        {articles.length > 0 && (
+          <div className="article-filters" role="group" aria-label="Filter articles">
+            {(["all", "unread", "starred", "archived"] as const).map((f) => (
+              <button
+                key={f}
+                className={`filter-chip${filter === f ? " active" : ""}`}
+                onClick={() => setFilter(f)}
+              >
+                {f === "all"
+                  ? "All"
+                  : f === "unread"
+                    ? "Unread"
+                    : f === "starred"
+                      ? "Starred"
+                      : "Archived"}
+              </button>
+            ))}
+            {allTags.map((t) => (
+              <button
+                key={t}
+                className={`filter-chip tag-chip${activeTag === t ? " active" : ""}`}
+                onClick={() => setActiveTag(activeTag === t ? null : t)}
+                title={`Show only “${t}”`}
+              >
+                <Tag size={11} />
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {visible.length === 0 ? (
           <div className="empty-state">
             <Newspaper size={28} />
-            <p>Nothing saved yet — paste a link above.</p>
-            <p className="empty-hint">
-              Tip: drag the “Save to Leaf” link below onto your bookmarks bar
-              to save pages from any website.
+            <p>
+              {articles.length === 0
+                ? "Nothing saved yet — paste a link above."
+                : "Nothing matches this filter."}
             </p>
+            {articles.length === 0 && (
+              <p className="empty-hint">
+                Tip: drag the “Save to Leaf” link below onto your bookmarks bar
+                to save pages from any website.
+              </p>
+            )}
           </div>
         ) : (
           <ul className="article-list">
-            {articles.map((a) => (
+            {visible.map((a) => (
               <li key={a.id} className="article-row">
                 <button
                   className="article-row-main"
@@ -205,20 +278,102 @@ export default function ArticlesList({
                     className={`article-status${a.readAt ? "" : " unread"}`}
                   />
                   <span className="article-row-text">
-                    <span className="article-row-title">{a.title}</span>
+                    <span className="article-row-title">
+                      {a.starredAt ? "★ " : ""}
+                      {a.title}
+                      {a.archivedAt ? " (archived)" : ""}
+                    </span>
                     <span className="article-row-meta">
                       {a.domain} · added {timeAgo(a.addedAt)}
                     </span>
+                    {(a.tags ?? []).length > 0 && (
+                      <span className="article-row-tags">
+                        {(a.tags ?? []).map((t) => (
+                          <span key={t} className="article-tag">
+                            {t}
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </span>
                 </button>
-                <button
-                  className="mini-btn"
-                  onClick={() => remove(a.id)}
-                  title="Remove from reading list"
-                  aria-label={`Remove ${a.title}`}
-                >
-                  <Trash2 size={14} />
-                </button>
+                {tagEditId === a.id ? (
+                  <form
+                    className="tag-editor"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      commitTags(a);
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      value={tagDraft}
+                      onChange={(e) => setTagDraft(e.target.value)}
+                      onBlur={() => commitTags(a)}
+                      placeholder="tags, comma, separated"
+                      aria-label={`Tags for ${a.title}`}
+                    />
+                    <button
+                      type="button"
+                      className="mini-btn"
+                      onClick={() => {
+                        setTagEditId(null);
+                        setTagDraft("");
+                      }}
+                      aria-label="Cancel tag editing"
+                    >
+                      <X size={13} />
+                    </button>
+                  </form>
+                ) : (
+                  <span className="article-row-actions">
+                    <button
+                      className={`mini-btn${a.starredAt ? " star-on" : ""}`}
+                      onClick={() => {
+                        setArticleStar(a.id, !a.starredAt);
+                        setArticles(loadArticles());
+                      }}
+                      title={a.starredAt ? "Remove star" : "Star"}
+                      aria-label={`${a.starredAt ? "Unstar" : "Star"} ${a.title}`}
+                    >
+                      <Star size={14} />
+                    </button>
+                    <button
+                      className="mini-btn"
+                      onClick={() => {
+                        setArticleArchived(a.id, !a.archivedAt);
+                        setArticles(loadArticles());
+                      }}
+                      title={a.archivedAt ? "Unarchive" : "Archive"}
+                      aria-label={`${a.archivedAt ? "Unarchive" : "Archive"} ${a.title}`}
+                    >
+                      {a.archivedAt ? (
+                        <ArchiveRestore size={14} />
+                      ) : (
+                        <Archive size={14} />
+                      )}
+                    </button>
+                    <button
+                      className="mini-btn"
+                      onClick={() => {
+                        setTagEditId(a.id);
+                        setTagDraft((a.tags ?? []).join(", "));
+                      }}
+                      title="Edit tags"
+                      aria-label={`Edit tags for ${a.title}`}
+                    >
+                      <Tag size={14} />
+                    </button>
+                    <button
+                      className="mini-btn"
+                      onClick={() => remove(a.id)}
+                      title="Remove from reading list"
+                      aria-label={`Remove ${a.title}`}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </span>
+                )}
               </li>
             ))}
           </ul>

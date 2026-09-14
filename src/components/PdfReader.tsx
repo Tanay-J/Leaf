@@ -5,13 +5,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Minus, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Minus, Plus, Search } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { Book } from "../books";
-import { loadProgress, saveProgress } from "../lib";
+import { addReadingSeconds, loadProgress, saveProgress } from "../lib";
 import { loadBook } from "../bookLoader";
+import SearchPanel, { type SearchHit } from "./SearchPanel";
 import {
   PassphraseRequiredError,
   WrongPassphraseError,
@@ -38,10 +39,17 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const taskRef = useRef<RenderTask | null>(null);
   const seqRef = useRef(0);
+  /** Per-page text cache, filled lazily by search. */
+  const pageTextRef = useRef<Map<number, string>>(new Map());
 
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(() => loadProgress(book.id).page ?? 1);
   const [zoom, setZoom] = useState(() => loadProgress(book.id).zoom ?? 1);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchHit[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searched, setSearched] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading"
   );
@@ -228,6 +236,87 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
     });
   }, [page, zoom, numPages, book.id, clampPage]);
 
+  /* Reading-time tracking: 15 s ticks while the PDF is open and visible. */
+  useEffect(() => {
+    if (status !== "ready") return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        addReadingSeconds(book.id, 15);
+      }
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [status, book.id]);
+
+  /* In-book search: extracts each page's text (cached after first pass). */
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      setSearched("");
+      return;
+    }
+    let disposed = false;
+    const timer = window.setTimeout(async () => {
+      setSearchBusy(true);
+      const hits: SearchHit[] = [];
+      const pdf = pdfRef.current;
+      const lower = q.toLowerCase();
+      if (pdf) {
+        for (let p = 1; p <= pdf.numPages && hits.length < 30; p++) {
+          let text = pageTextRef.current.get(p);
+          if (text === undefined) {
+            try {
+              const pdfPage = await pdf.getPage(p);
+              const content = await pdfPage.getTextContent();
+              text = content.items
+                .map((it) => ("str" in it ? it.str : ""))
+                .join(" ")
+                .replace(/\s+/g, " ")
+                .trim();
+              pageTextRef.current.set(p, text);
+              pdfPage.cleanup();
+            } catch {
+              text = "";
+              pageTextRef.current.set(p, text);
+            }
+          }
+          if (!text) continue;
+          const lowerText = text.toLowerCase();
+          let idx = lowerText.indexOf(lower);
+          let count = 0;
+          while (idx !== -1 && count < 2 && hits.length < 30) {
+            const from = Math.max(0, idx - 60);
+            const to = Math.min(text.length, idx + lower.length + 60);
+            hits.push({
+              id: `p${p}-${idx}`,
+              where: `Page ${p}`,
+              excerpt: `${from > 0 ? "…" : ""}${text.slice(from, to)}${
+                to < text.length ? "…" : ""
+              }`,
+              page: p,
+            });
+            count++;
+            idx = lowerText.indexOf(lower, idx + lower.length);
+          }
+        }
+      }
+      if (disposed) return;
+      setResults(hits);
+      setSearched(q);
+      setSearchBusy(false);
+    }, 350);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, searchOpen]);
+
+  const pickSearch = (hit: SearchHit) => {
+    if (hit.page) setPage(clampPage(hit.page));
+    setSearchOpen(false);
+  };
+
   /* Re-render on container resize (fit-to-width depends on it). */
   useEffect(() => {
     const el = canvasRef.current?.parentElement;
@@ -266,6 +355,14 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
     setControls(
       <>
         <button
+          className={`mini-btn${searchOpen ? " active" : ""}`}
+          onClick={() => setSearchOpen((o) => !o)}
+          title="Search in book"
+          aria-label="Search in book"
+        >
+          <Search size={14} />
+        </button>
+        <button
           className="mini-btn"
           onClick={() =>
             setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))
@@ -287,7 +384,7 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
       </>
     );
     return () => setControls(null);
-  }, [zoom, setControls]);
+  }, [zoom, searchOpen, setControls]);
 
   /* Render the outline (bookmarks) into the collapsible sidebar. */
   useEffect(() => {
@@ -320,6 +417,16 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
 
   return (
     <div className="format-reader">
+      <SearchPanel
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        query={query}
+        onQueryChange={setQuery}
+        results={results}
+        busy={searchBusy}
+        searched={searched}
+        onPick={pickSearch}
+      />
       {status === "loading" && !needsPassphrase && (
         <div className="pane-overlay">
           <Loader2 className="spin" size={26} />

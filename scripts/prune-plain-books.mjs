@@ -14,7 +14,8 @@ try {
   let removed = 0;
   for (const f of files) {
     // catalog.json is the generated manifest the app fetches — keep it.
-    if (!f.endsWith(".enc") && f !== "catalog.json") {
+    // covers/ holds the deploy-time cover images catalog.json points at.
+    if (!f.endsWith(".enc") && f !== "catalog.json" && f !== "covers") {
       await unlink(path.join(dir, f));
       removed++;
     }

@@ -21,8 +21,10 @@ import {
   PROGRESS_SAVED_EVENT,
   loadAllProgress,
   readDays,
+  readSecondsMap,
   replaceProgress,
   replaceReadDays,
+  replaceReadSeconds,
   type BookProgress,
 } from "./lib";
 import {
@@ -42,7 +44,8 @@ import {
 
 const STATE_PATH = "state/leaf-state.json";
 const SYNC_BRANCH = "sync";
-const SCHEMA = 1;
+/** 2: adds readSeconds (per-day reading time). Schema-1 payloads still load. */
+const SCHEMA = 2;
 const LAST_KEY = "leaf:state-sync";
 const DEBOUNCE_MS = 3_000;
 const PUSH_COOLDOWN_MS = 15_000;
@@ -82,6 +85,8 @@ interface StatePayload {
   progress: Record<string, ProgressRecord>;
   pins: Record<string, PinRecord>;
   readDays: Record<string, boolean>;
+  /** Seconds read per local day (YYYY-MM-DD → seconds). */
+  readSeconds: Record<string, number>;
 }
 
 let status: StateSyncStatus = isVaultConnected()
@@ -187,8 +192,21 @@ function buildPayload(remote?: StatePayload | null): string {
     progress: buildLocalProgress(),
     pins: buildLocalPins(),
     readDays: readDaysMap,
+    // Max per day: another device's tally never lowers ours.
+    readSeconds: maxMergeNumbers(remote?.readSeconds, readSecondsMap()),
   };
   return JSON.stringify(payload);
+}
+
+function maxMergeNumbers(
+  remote: Record<string, number> | undefined,
+  local: Record<string, number>
+): Record<string, number> {
+  const out: Record<string, number> = { ...local };
+  for (const [k, v] of Object.entries(remote ?? {})) {
+    out[k] = Math.max(out[k] ?? 0, v ?? 0);
+  }
+  return out;
 }
 
 function mergeProgress(
@@ -279,6 +297,7 @@ function mergeState(local: StatePayload, remote: StatePayload): StatePayload {
     progress: mergeProgress(local.progress, remote.progress),
     pins: mergePins(local.pins, remote.pins),
     readDays: { ...remote.readDays, ...local.readDays },
+    readSeconds: maxMergeNumbers(remote.readSeconds, local.readSeconds),
   };
 }
 
@@ -303,6 +322,7 @@ function applyState(merged: StatePayload): void {
     }
     replacePins(next);
     replaceReadDays(merged.readDays);
+    replaceReadSeconds(merged.readSeconds);
   } finally {
     applyingRemote = false;
   }
@@ -316,12 +336,14 @@ async function pullRemoteState(): Promise<StatePayload | null> {
   if (!entry?.content) return null;
   try {
     const data = JSON.parse(entry.content) as Partial<StatePayload>;
-    if (!data || data.schema !== SCHEMA) return null;
+    // Schema 2 = +readSeconds; schema 1 payloads simply have none.
+    if (!data || (data.schema !== 1 && data.schema !== SCHEMA)) return null;
     return {
       schema: SCHEMA,
       progress: data.progress ?? {},
       pins: data.pins ?? {},
       readDays: data.readDays ?? {},
+      readSeconds: data.readSeconds ?? {},
     };
   } catch {
     return null; // unreadable payload — start over with whatever local has
@@ -358,12 +380,14 @@ export async function statePullAndMerge(): Promise<void> {
       progress: buildLocalProgress(),
       pins: buildLocalPins(),
       readDays: readDays(),
+      readSeconds: readSecondsMap(),
     },
     remote ?? {
       schema: SCHEMA,
       progress: {},
       pins: {},
       readDays: {},
+      readSeconds: {},
     }
   );
   applyState(merged);

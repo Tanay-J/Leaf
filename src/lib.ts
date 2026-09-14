@@ -123,6 +123,8 @@ export interface BookProgress {
   /** Reading position as 0..1 (EPUBs; PDFs derive it from page/total). */
   pct?: number;
   zoom?: number;
+  /** PDF-only: invert page colors for dark/sepia reading. */
+  invert?: boolean;
   /** Last time the position itself moved (not a font tweak) — sync LWW. */
   lastReadAt?: number | null;
   /** First time the book was read to the end. */

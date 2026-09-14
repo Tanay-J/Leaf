@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ArrowLeft, Keyboard, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import type { Book } from "../books";
 import { navigate, useSidebarOpen, type Theme } from "../lib";
 import EpubReader from "./EpubReader";
@@ -12,6 +12,15 @@ interface Props {
   onCycleTheme: () => void;
 }
 
+const SHORTCUTS: [string, string][] = [
+  ["← / →, J / K", "Previous / next page"],
+  ["Space / Shift+Space", "Next / previous page"],
+  ["S", "Toggle the contents sidebar"],
+  ["F", "Fullscreen"],
+  ["Esc", "Close the search panel or dialogs"],
+  ["?", "This shortcut list"],
+];
+
 export default function Reader({ book, theme, onCycleTheme }: Props) {
   // Format-specific controls (TOC / font size / zoom) are rendered by the
   // child reader into the topbar via this slot.
@@ -20,6 +29,36 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
   // collapsible left pane.
   const [sidebar, setSidebar] = useState<ReactNode>(null);
   const { sidebarOpen, toggleSidebar } = useSidebarOpen();
+
+  // Reading position as 0..1, reported by the active reader — drawn as the
+  // thin progress line under the topbar.
+  const [pct, setPct] = useState<number | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+
+  /* Reader-level shortcuts: sidebar, fullscreen, help. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)
+      ) {
+        return;
+      }
+      if (e.key === "Escape" && showHelp) {
+        setShowHelp(false);
+        return;
+      }
+      if (e.key === "s") toggleSidebar();
+      if (e.key === "f") {
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void document.documentElement.requestFullscreen();
+      }
+      if (e.key === "?") setShowHelp((h) => !h);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showHelp, toggleSidebar]);
 
   return (
     <div className="reader-shell">
@@ -47,9 +86,43 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
         </div>
         <div className="topbar-actions">
           {controls}
+          <button
+            className="icon-btn"
+            onClick={() => setShowHelp((h) => !h)}
+            title="Keyboard shortcuts"
+            aria-label="Keyboard shortcuts"
+          >
+            <Keyboard size={16} />
+          </button>
           <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
         </div>
+        {pct != null && (
+          <div className="reader-progress" aria-hidden>
+            <span style={{ width: `${Math.round(pct * 100)}%` }} />
+          </div>
+        )}
       </header>
+
+      {showHelp && (
+        <div className="kbd-pop" role="dialog" aria-label="Keyboard shortcuts">
+          <div className="kbd-pop-head">
+            <strong>Keyboard shortcuts</strong>
+            <button
+              className="icon-btn"
+              onClick={() => setShowHelp(false)}
+              aria-label="Close shortcuts"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          {SHORTCUTS.map(([keys, desc]) => (
+            <div className="kbd-row" key={keys}>
+              <span>{desc}</span>
+              <kbd>{keys}</kbd>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="reader-body">
         <aside className={`reader-sidebar ${sidebarOpen ? "" : "collapsed"}`}>
@@ -68,12 +141,14 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
               theme={theme}
               setControls={setControls}
               setSidebar={setSidebar}
+              onProgress={setPct}
             />
           ) : (
             <PdfReader
               book={book}
               setControls={setControls}
               setSidebar={setSidebar}
+              onProgress={setPct}
             />
           )}
         </main>

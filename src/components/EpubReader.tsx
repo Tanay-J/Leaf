@@ -5,15 +5,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Minus, Plus, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Search } from "lucide-react";
 import ePub from "epubjs";
 import type { Book as EpubBook, Rendition } from "epubjs";
 import type { Book } from "../books";
 import { addReadingSeconds, loadProgress, saveProgress, type Theme } from "../lib";
 import { loadBook } from "../bookLoader";
 import SearchPanel, { type SearchHit } from "./SearchPanel";
+import TypographyMenu from "./TypographyMenu";
 import {
-  FONT_OPTIONS,
   LINE_HEIGHT_OPTIONS,
   DEFAULT_SPACING_ID,
   fontStackFor,
@@ -44,6 +44,8 @@ interface Props {
   theme: Theme;
   setControls: (node: ReactNode) => void;
   setSidebar: (node: ReactNode) => void;
+  /** Reports reading position as 0..1 for the reader progress line. */
+  onProgress?: (pct: number | null) => void;
 }
 
 export default function EpubReader({
@@ -51,11 +53,14 @@ export default function EpubReader({
   theme,
   setControls,
   setSidebar,
+  onProgress,
 }: Props) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<Rendition | null>(null);
   const tocRef = useRef<TocEntry[]>([]);
   const bookRef = useRef<EpubBook | null>(null);
+  const swipeBound = useRef<WeakSet<object>>(new WeakSet());
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   const [toc, setToc] = useState<TocEntry[]>([]);
   const [activeToc, setActiveToc] = useState(-1);
@@ -108,6 +113,49 @@ export default function EpubReader({
         });
         renditionRef.current = rendition;
 
+        // Touch page-turns: swipes inside the iframe never reach the parent
+        // document, so listen in each rendered section's own document.
+        const rend = rendition; // non-null; const narrows inside the closure
+        rend.on("rendered", () => {
+          // Runtime returns an array of Contents (types simplify to one).
+          const contents = rend.getContents() as unknown as Array<{
+            document?: Document;
+          }>;
+          for (const c of contents) {
+            if (swipeBound.current.has(c)) continue;
+            swipeBound.current.add(c);
+            const doc: Document | undefined = c.document;
+            if (!doc) continue;
+            doc.addEventListener(
+              "touchstart",
+              (ev: TouchEvent) => {
+                touchStart.current = {
+                  x: ev.touches[0]?.clientX ?? 0,
+                  y: ev.touches[0]?.clientY ?? 0,
+                };
+              },
+              { passive: true }
+            );
+            doc.addEventListener(
+              "touchend",
+              (ev: TouchEvent) => {
+                const start = touchStart.current;
+                touchStart.current = null;
+                if (!start) return;
+                const dx = (ev.changedTouches[0]?.clientX ?? start.x) - start.x;
+                const dy = Math.abs(
+                  (ev.changedTouches[0]?.clientY ?? start.y) - start.y
+                );
+                if (Math.abs(dx) > 60 && Math.abs(dx) > dy * 1.5) {
+                  if (dx < 0) void renditionRef.current?.next();
+                  else void renditionRef.current?.prev();
+                }
+              },
+              { passive: true }
+            );
+          }
+        });
+
         // Flatten the table of contents into a dropdown list.
         eb.loaded.navigation
           .then((nav) => {
@@ -150,6 +198,7 @@ export default function EpubReader({
           setActiveToc(idx);
           const prev = loadProgress(book.id);
           const pct = location?.end?.percentage ?? 0;
+          onProgress?.(Math.min(1, Math.max(0, pct)));
           saveProgress(book.id, {
             ...prev,
             cfi,
@@ -348,7 +397,7 @@ export default function EpubReader({
     setSearchOpen(false);
   };
 
-  /* Keyboard navigation. */
+  /* Keyboard navigation: arrows, J/K, Space, and Esc for the search panel. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -358,12 +407,21 @@ export default function EpubReader({
       ) {
         return;
       }
-      if (e.key === "ArrowLeft") goPrev();
-      if (e.key === "ArrowRight") goNext();
+      if (e.key === "Escape" && searchOpen) {
+        setSearchOpen(false);
+        return;
+      }
+      if (e.key === "ArrowLeft" || e.key === "k") goPrev();
+      if (e.key === "ArrowRight" || e.key === "j") goNext();
+      if (e.key === " ") {
+        e.preventDefault();
+        if (e.shiftKey) goPrev();
+        else goNext();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goPrev, goNext]);
+  }, [goPrev, goNext, searchOpen]);
 
   /* Render format-specific controls into the topbar slot. */
   useEffect(() => {
@@ -377,45 +435,14 @@ export default function EpubReader({
         >
           <Search size={14} />
         </button>
-        <select
-          className="control-select"
-          value={fontFamily}
-          onChange={(e) => setFontFamily(e.target.value)}
-          title="Font style"
-        >
-          {FONT_OPTIONS.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className="control-select"
-          value={spacingId}
-          onChange={(e) => setSpacingId(e.target.value)}
-          title="Line spacing"
-        >
-          {LINE_HEIGHT_OPTIONS.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <button
-          className="mini-btn"
-          onClick={() => changeFont(-10)}
-          title="Smaller text"
-        >
-          <Minus size={14} />
-        </button>
-        <span className="pos-label">{fontSize}%</span>
-        <button
-          className="mini-btn"
-          onClick={() => changeFont(10)}
-          title="Larger text"
-        >
-          <Plus size={14} />
-        </button>
+        <TypographyMenu
+          fontId={fontFamily}
+          spacingId={spacingId}
+          fontSize={fontSize}
+          onFont={setFontFamily}
+          onSpacing={setSpacingId}
+          onSize={changeFont}
+        />
       </>
     );
     return () => setControls(null);

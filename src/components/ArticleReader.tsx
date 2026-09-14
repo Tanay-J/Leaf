@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, Loader2, Minus, Plus } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { setArticleRead, updateArticleTitle, type SavedArticle } from "../articles";
 import { navigate, type Theme } from "../lib";
 import { loadArticleContent, saveArticleContent } from "../localBooks";
-import { ARTICLE_DEFAULT_LINE_HEIGHT, FONT_OPTIONS, LINE_HEIGHT_OPTIONS, DEFAULT_SPACING_ID, fontStackFor, spacingValueFor } from "../typography";
+import {
+  ARTICLE_DEFAULT_LINE_HEIGHT,
+  DEFAULT_SPACING_ID,
+  fontStackFor,
+  spacingValueFor,
+} from "../typography";
 import ThemeButton from "./ThemeButton";
+import TypographyMenu from "./TypographyMenu";
 
 interface Props {
   article: SavedArticle;
@@ -175,37 +181,14 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
           >
             <ExternalLink size={15} />
           </a>
-          <select
-            className="control-select"
-            value={fontFamily}
-            onChange={(e) => changeFontFamily(e.target.value)}
-            title="Font style"
-          >
-            {FONT_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="control-select"
-            value={spacingId}
-            onChange={(e) => changeSpacing(e.target.value)}
-            title="Line spacing"
-          >
-            {LINE_HEIGHT_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <button className="mini-btn" onClick={() => changeFont(-10)} title="Smaller text">
-            <Minus size={14} />
-          </button>
-          <span className="pos-label">{font}%</span>
-          <button className="mini-btn" onClick={() => changeFont(10)} title="Larger text">
-            <Plus size={14} />
-          </button>
+          <TypographyMenu
+            fontId={fontFamily}
+            spacingId={spacingId}
+            fontSize={font}
+            onFont={changeFontFamily}
+            onSpacing={changeSpacing}
+            onSize={changeFont}
+          />
           <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
         </div>
       </header>

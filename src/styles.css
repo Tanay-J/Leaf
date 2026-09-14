@@ -933,6 +933,44 @@ html.dark-theme .book-list-icon {
   opacity: 1;
 }
 
+/* Details (ⓘ) stacks below the pin/remove button instead of colliding
+   with it (and with the type pill on the cover). */
+.card-info {
+  top: 46px;
+}
+
+/* Keyboard users reveal actions when focus is anywhere in the card. */
+.book-card-wrap:focus-within .card-remove,
+.book-list-row-wrap:focus-within .card-remove {
+  opacity: 1;
+}
+
+/* Touch devices never hover — card actions must stay visible, and every
+   tap target grows to a comfortable size. */
+@media (hover: none) {
+  .card-remove,
+  .card-add {
+    opacity: 1;
+    width: 40px;
+    height: 40px;
+  }
+
+  .card-info {
+    top: 56px;
+  }
+
+  .mini-btn,
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .article-row-actions .mini-btn {
+    width: 36px;
+    height: 36px;
+  }
+}
+
 .card-remove:hover {
   color: #dc2626;
   border-color: #dc2626;
@@ -1630,16 +1668,33 @@ html.dark-theme .brand-mark-articles {
 /* ---------- Responsive ---------- */
 
 @media (max-width: 720px) {
+  /* Topbars wrap: the search field gets its own full-width row and the
+     action buttons flow onto the next line instead of overflowing. */
   .topbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
     padding: 12px 14px;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .search-shell {
+    flex: 1 1 100%;
+    order: 9;
+  }
+
+  /* Reader: book title owns the first line, controls share the second. */
+  .reader-topbar .reader-title {
+    order: -1;
+    flex-basis: 100%;
+    text-align: left;
   }
 
   .content {
     padding: 20px 14px 44px;
-  }
-
-  .search-shell {
-    flex-basis: 150px;
   }
 
   .reader-title span {
@@ -2216,4 +2271,179 @@ html.dark-theme .brand-mark-articles {
   width: 40px;
   height: 40px;
   justify-content: center;
+}
+
+/* ---------- Reader progress line ---------- */
+
+.reader-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--border-color-light);
+  pointer-events: none;
+}
+
+.reader-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--primary-color);
+  transition: width 0.25s ease;
+}
+
+/* ---------- Typography popover ("Aa") ---------- */
+
+.typo-menu {
+  position: relative;
+}
+
+.typo-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 300px;
+  max-width: calc(100vw - 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 14px;
+}
+
+.typo-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.typo-fonts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.typo-font {
+  text-align: left;
+  border: 1px solid var(--border-color);
+  background: var(--tag-bg);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typo-font:hover {
+  border-color: var(--primary-color);
+}
+
+.typo-font.active {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: var(--primary-bg);
+}
+
+.typo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.typo-row .typo-label {
+  margin: 0;
+  flex: 1;
+}
+
+.typo-spacing {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.typo-spacing button {
+  border: 1px solid var(--border-color);
+  background: var(--tag-bg);
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.typo-spacing button:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.typo-spacing button.active {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: var(--primary-bg);
+}
+
+/* ---------- PDF dark reading ---------- */
+
+.pdf-canvas.inverted {
+  filter: invert(0.92) hue-rotate(180deg);
+}
+
+/* ---------- Keyboard shortcut help ---------- */
+
+.kbd-pop {
+  position: fixed;
+  top: 64px;
+  right: 12px;
+  z-index: 60;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  background: var(--bg-app);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  padding: 14px;
+}
+
+.kbd-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.kbd-pop-head strong {
+  font-size: 13px;
+}
+
+.kbd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 7px 0;
+}
+
+.kbd-row kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--code-bg);
+  border: 1px solid var(--border-color-light);
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--text-main);
+  white-space: nowrap;
 }

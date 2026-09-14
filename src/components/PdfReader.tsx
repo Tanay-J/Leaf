@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Minus, Plus, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Contrast, Loader2, Minus, Plus, Search } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -32,9 +32,16 @@ interface Props {
   book: Book;
   setControls: (node: ReactNode) => void;
   setSidebar: (node: ReactNode) => void;
+  /** Reports reading position as 0..1 for the reader progress line. */
+  onProgress?: (pct: number | null) => void;
 }
 
-export default function PdfReader({ book, setControls, setSidebar }: Props) {
+export default function PdfReader({
+  book,
+  setControls,
+  setSidebar,
+  onProgress,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const taskRef = useRef<RenderTask | null>(null);
@@ -50,6 +57,16 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
   const [results, setResults] = useState<SearchHit[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searched, setSearched] = useState("");
+  const [invert, setInvert] = useState(
+    () => loadProgress(book.id).invert ?? false
+  );
+
+  const toggleInvert = () =>
+    setInvert((v) => {
+      const next = !v;
+      saveProgress(book.id, { ...loadProgress(book.id), invert: next });
+      return next;
+    });
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading"
   );
@@ -247,6 +264,13 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
     return () => window.clearInterval(timer);
   }, [status, book.id]);
 
+  /* Reader progress line: position as 0..1. */
+  useEffect(() => {
+    onProgress?.(
+      numPages ? Math.min(1, Math.max(0, clampPage(page) / numPages)) : null
+    );
+  }, [page, numPages, clampPage, onProgress]);
+
   /* In-book search: extracts each page's text (cached after first pass). */
   useEffect(() => {
     if (!searchOpen) return;
@@ -343,12 +367,23 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
       ) {
         return;
       }
-      if (e.key === "ArrowLeft") setPage((p) => clampPage(p - 1));
-      if (e.key === "ArrowRight") setPage((p) => clampPage(p + 1));
+      if (e.key === "Escape" && searchOpen) {
+        setSearchOpen(false);
+        return;
+      }
+      if (e.key === "ArrowLeft" || e.key === "k")
+        setPage((p) => clampPage(p - 1));
+      if (e.key === "ArrowRight" || e.key === "j")
+        setPage((p) => clampPage(p + 1));
+      if (e.key === " ") {
+        e.preventDefault();
+        if (e.shiftKey) setPage((p) => clampPage(p - 1));
+        else setPage((p) => clampPage(p + 1));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clampPage]);
+  }, [clampPage, searchOpen]);
 
   /* Render format-specific controls into the topbar slot. */
   useEffect(() => {
@@ -381,10 +416,19 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
         >
           <Plus size={14} />
         </button>
+        <button
+          className={`mini-btn${invert ? " active" : ""}`}
+          onClick={toggleInvert}
+          title="Invert page colors (dark reading)"
+          aria-label="Invert page colors"
+          aria-pressed={invert}
+        >
+          <Contrast size={14} />
+        </button>
       </>
     );
     return () => setControls(null);
-  }, [zoom, searchOpen, setControls]);
+  }, [zoom, searchOpen, invert, setControls]);
 
   /* Render the outline (bookmarks) into the collapsible sidebar. */
   useEffect(() => {
@@ -451,7 +495,10 @@ export default function PdfReader({ book, setControls, setSidebar }: Props) {
         </div>
       )}
       <div className="pdf-scroll">
-        <canvas ref={canvasRef} className="pdf-canvas" />
+        <canvas
+          ref={canvasRef}
+          className={`pdf-canvas${invert ? " inverted" : ""}`}
+        />
       </div>
       <footer className="reader-navbar">
         <button

@@ -33,6 +33,7 @@ import {
   USER_BOOKS_CHANGED_EVENT,
   type UserBook,
 } from "./userBooks";
+import { CATALOG_LOADED_EVENT, getCatalog } from "./books";
 import {
   ensureVaultBranch,
   getVaultText,
@@ -44,8 +45,10 @@ import {
 
 const STATE_PATH = "state/leaf-state.json";
 const SYNC_BRANCH = "sync";
-/** 2: adds readSeconds (per-day reading time). Schema-1 payloads still load. */
-const SCHEMA = 2;
+/** 2: adds readSeconds (per-day reading time). Schema-1 payloads still load.
+ *  3: pins carry the book metadata (title/author/type/url/cover) so a fresh
+ *     device can materialise My library from the vault alone. */
+const SCHEMA = 3;
 const LAST_KEY = "leaf:state-sync";
 const DEBOUNCE_MS = 3_000;
 const PUSH_COOLDOWN_MS = 15_000;
@@ -72,6 +75,13 @@ interface PinRecord {
   pinnedAt?: number;
   removedAt: number | null;
   updatedAt: number;
+  /** Book metadata (schema 3) so another device can re-create the library
+   *  entry. Absent on records written by older builds. */
+  title?: string;
+  author?: string;
+  type?: "epub" | "pdf";
+  url?: string;
+  cover?: string;
 }
 
 interface ProgressRecord extends BookProgress {
@@ -160,11 +170,19 @@ function buildLocalProgress(): Record<string, ProgressRecord> {
 function buildLocalPins(): Record<string, PinRecord> {
   const out: Record<string, PinRecord> = {};
   for (const b of loadAllPins()) {
+    // Device-local books (file lives in this browser's IndexedDB) can't
+    // follow the pin — skip them so an empty url never syncs.
+    if (b.blobKey || !b.url) continue;
     out[b.id] = {
       addedAt: b.addedAt,
       pinnedAt: b.pinnedAt ?? b.addedAt,
       removedAt: b.removedAt ?? null,
       updatedAt: b.updatedAt ?? b.addedAt,
+      ...(b.title ? { title: b.title } : {}),
+      ...(b.author ? { author: b.author } : {}),
+      ...(b.type ? { type: b.type } : {}),
+      ...(b.url ? { url: b.url } : {}),
+      ...(b.cover ? { cover: b.cover } : {}),
     };
   }
   return out;
@@ -306,26 +324,58 @@ function applyState(merged: StatePayload): void {
   applyingRemote = true;
   try {
     replaceProgress(merged.progress as Record<string, BookProgress>);
-    // Pins: only for books this device knows — unknown ids resolve on a
-    // later pull once the catalog has loaded.
+    // Pins: merge into entries this device knows, and CREATE the ones it
+    // doesn't (fresh device) from the remote metadata — or, for the
+    // metadata-less payloads older builds wrote, from the published catalog.
+    // Unresolvable ids land on a later pull once the catalog has loaded.
     const current = loadAllPins();
-    const next: UserBook[] = [...current];
+    const byId = new Map<string, UserBook>(current.map((b) => [b.id, b]));
     for (const [id, rec] of Object.entries(merged.pins)) {
-      const idx = next.findIndex((b) => b.id === id);
-      if (idx < 0) continue;
-      next[idx] = {
-        ...next[idx],
-        pinnedAt: rec.pinnedAt ?? next[idx].addedAt,
-        removedAt: rec.removedAt,
-        updatedAt: Math.max(next[idx].updatedAt ?? 0, rec.updatedAt ?? 0),
-      };
+      const existing = byId.get(id);
+      if (existing) {
+        existing.pinnedAt = rec.pinnedAt ?? existing.addedAt;
+        existing.removedAt = rec.removedAt;
+        existing.updatedAt = Math.max(existing.updatedAt ?? 0, rec.updatedAt ?? 0);
+        continue;
+      }
+      const made = materializePin(id, rec);
+      if (made) byId.set(id, made);
     }
-    replacePins(next);
+    replacePins([...byId.values()]);
     replaceReadDays(merged.readDays);
     replaceReadSeconds(merged.readSeconds);
   } finally {
     applyingRemote = false;
   }
+}
+
+/** Builds a library entry for a remote pin this device has never seen —
+ *  from the record's own metadata (schema 3), falling back to the published
+ *  catalog for payloads written by older builds. */
+function materializePin(id: string, rec: PinRecord): UserBook | null {
+  if (rec.title && rec.type && rec.url) {
+    return {
+      id,
+      title: rec.title,
+      type: rec.type,
+      url: rec.url,
+      ...(rec.author ? { author: rec.author } : {}),
+      ...(rec.cover ? { cover: rec.cover } : {}),
+      addedAt: rec.addedAt,
+      pinnedAt: rec.pinnedAt ?? rec.addedAt,
+      removedAt: rec.removedAt ?? null,
+      updatedAt: rec.updatedAt ?? rec.addedAt,
+    };
+  }
+  const cat = getCatalog().find((b) => b.id === id);
+  if (!cat) return null;
+  return {
+    ...cat,
+    addedAt: rec.addedAt,
+    pinnedAt: rec.pinnedAt ?? rec.addedAt,
+    removedAt: rec.removedAt ?? null,
+    updatedAt: rec.updatedAt ?? rec.addedAt,
+  };
 }
 
 /* ---------- pull / push ---------- */
@@ -336,8 +386,12 @@ async function pullRemoteState(): Promise<StatePayload | null> {
   if (!entry?.content) return null;
   try {
     const data = JSON.parse(entry.content) as Partial<StatePayload>;
-    // Schema 2 = +readSeconds; schema 1 payloads simply have none.
-    if (!data || (data.schema !== 1 && data.schema !== SCHEMA)) return null;
+    // Schema 2 = +readSeconds; schema 1 payloads simply have none. Schema 3
+    // additionally packs book metadata into pin records (pins without it
+    // still resolve against the catalog — see materializePin).
+    if (!data || (data.schema !== 1 && data.schema !== 2 && data.schema !== SCHEMA)) {
+      return null;
+    }
     return {
       schema: SCHEMA,
       progress: data.progress ?? {},
@@ -449,6 +503,13 @@ export function initStateSync(): void {
   initialized = true;
   window.addEventListener(PROGRESS_SAVED_EVENT, onStateChanged);
   window.addEventListener(USER_BOOKS_CHANGED_EVENT, onStateChanged);
+  // A pin whose book wasn't known yet (fresh device, catalog still loading)
+  // resolves the moment books/catalog.json arrives.
+  window.addEventListener(CATALOG_LOADED_EVENT, () => {
+    void statePullAndMerge().catch(() => {
+      // Silent: the next pull (focus, Sync now) retries anyway.
+    });
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !isVaultConnected()) return;
     if (Date.now() - lastFocusPullAt < FOCUS_PULL_COOLDOWN_MS) return;

@@ -180,6 +180,19 @@ export const BOOKS: Book[] = [
 
 let catalogCache: Book[] | null = null;
 
+/** Fired whenever books/catalog.json (or the static fallback) has landed in
+ *  the session cache — state sync listens so pins for books a fresh device
+ *  didn't know yet can materialise on a follow-up pull. */
+export const CATALOG_LOADED_EVENT = "leaf:catalog-loaded";
+
+function emitCatalogLoaded(): void {
+  try {
+    window.dispatchEvent(new CustomEvent(CATALOG_LOADED_EVENT));
+  } catch {
+    /* SSR / unavailable */
+  }
+}
+
 /** The catalog to render right now: the published manifest once loaded,
  *  otherwise the static list above. */
 export function getCatalog(): Book[] {
@@ -202,6 +215,7 @@ export async function loadCatalog(force = false): Promise<Book[]> {
     if (!catalogCache) catalogCache = BOOKS;
     // keep the existing cache on a failed force-refresh (transient network)
   }
+  emitCatalogLoaded();
   return catalogCache;
 }
 

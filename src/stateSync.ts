@@ -19,9 +19,11 @@
  */
 import {
   PROGRESS_SAVED_EVENT,
+  bookSecondsMap,
   loadAllProgress,
   readDays,
   readSecondsMap,
+  replaceBookSeconds,
   replaceProgress,
   replaceReadDays,
   replaceReadSeconds,
@@ -97,6 +99,8 @@ interface StatePayload {
   readDays: Record<string, boolean>;
   /** Seconds read per local day (YYYY-MM-DD → seconds). */
   readSeconds: Record<string, number>;
+  /** Cumulative seconds read per book (bookId → seconds). */
+  bookSeconds?: Record<string, number>;
 }
 
 let status: StateSyncStatus = isVaultConnected()
@@ -210,8 +214,9 @@ function buildPayload(remote?: StatePayload | null): string {
     progress: buildLocalProgress(),
     pins: buildLocalPins(),
     readDays: readDaysMap,
-    // Max per day: another device's tally never lowers ours.
+    // Max per day / per book: another device's tally never lowers ours.
     readSeconds: maxMergeNumbers(remote?.readSeconds, readSecondsMap()),
+    bookSeconds: maxMergeNumbers(remote?.bookSeconds, bookSecondsMap()),
   };
   return JSON.stringify(payload);
 }
@@ -293,8 +298,10 @@ function mergePins(
         : { ...r, addedAt, removedAt: null, updatedAt: touched };
       continue;
     }
-    // Both live — union.
+    // Both live — union, preserving schema-3 book metadata from either side.
     out[id] = {
+      ...r,
+      ...l,
       addedAt,
       pinnedAt: Math.max(l.pinnedAt ?? 0, r.pinnedAt ?? 0) || addedAt,
       removedAt: null,
@@ -316,6 +323,7 @@ function mergeState(local: StatePayload, remote: StatePayload): StatePayload {
     pins: mergePins(local.pins, remote.pins),
     readDays: { ...remote.readDays, ...local.readDays },
     readSeconds: maxMergeNumbers(remote.readSeconds, local.readSeconds),
+    bookSeconds: maxMergeNumbers(remote.bookSeconds, local.bookSeconds ?? {}),
   };
 }
 
@@ -344,6 +352,7 @@ function applyState(merged: StatePayload): void {
     replacePins([...byId.values()]);
     replaceReadDays(merged.readDays);
     replaceReadSeconds(merged.readSeconds);
+    if (merged.bookSeconds) replaceBookSeconds(merged.bookSeconds);
   } finally {
     applyingRemote = false;
   }
@@ -398,6 +407,7 @@ async function pullRemoteState(): Promise<StatePayload | null> {
       pins: data.pins ?? {},
       readDays: data.readDays ?? {},
       readSeconds: data.readSeconds ?? {},
+      bookSeconds: data.bookSeconds ?? {},
     };
   } catch {
     return null; // unreadable payload — start over with whatever local has
@@ -435,6 +445,7 @@ export async function statePullAndMerge(): Promise<void> {
       pins: buildLocalPins(),
       readDays: readDays(),
       readSeconds: readSecondsMap(),
+      bookSeconds: bookSecondsMap(),
     },
     remote ?? {
       schema: SCHEMA,
@@ -442,6 +453,7 @@ export async function statePullAndMerge(): Promise<void> {
       pins: {},
       readDays: {},
       readSeconds: {},
+      bookSeconds: {},
     }
   );
   applyState(merged);

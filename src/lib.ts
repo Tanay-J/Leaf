@@ -310,3 +310,25 @@ export function replaceReadSeconds(map: Record<string, number>): void {
     /* storage unavailable */
   }
 }
+
+/**
+ * Max-merges remote per-book seconds into local — used by the state sync
+ * engine after a pull so BookDetail reading time stays in sync across devices.
+ */
+export function replaceBookSeconds(map: Record<string, number>): void {
+  try {
+    const local = bookSecondsMap();
+    const merged: Record<string, number> = { ...local };
+    for (const [id, secs] of Object.entries(map)) {
+      merged[id] = Math.max(merged[id] ?? 0, secs ?? 0);
+    }
+    localStorage.setItem(BOOK_SECONDS_KEY, JSON.stringify(merged));
+  } catch {
+    /* storage unavailable */
+  }
+  try {
+    window.dispatchEvent(new CustomEvent(READING_TIME_EVENT));
+  } catch {
+    /* unavailable */
+  }
+}

@@ -262,7 +262,8 @@ function typeFromFileName(name: string): BookType | null {
  */
 export async function addLocalBook(
   file: File,
-  sha256?: string
+  sha256?: string,
+  meta?: { title?: string; author?: string }
 ): Promise<{
   book: UserBook;
   added: boolean;
@@ -272,7 +273,8 @@ export async function addLocalBook(
     throw new Error("Only .epub and .pdf files can be added.");
   }
   const list = readAll();
-  const title = titleFromFileName(file.name);
+  const title = meta?.title?.trim() || titleFromFileName(file.name);
+  const author = meta?.author?.trim();
   const id = makeId(new Set(list.map((b) => b.id)), file.name, title);
   const blobKey = `file:${id}`;
 
@@ -287,6 +289,7 @@ export async function addLocalBook(
   const book: UserBook = {
     id,
     title,
+    ...(author ? { author } : {}),
     type,
     url: "",
     blobKey,

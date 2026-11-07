@@ -86,6 +86,8 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
       ? `Reading · last opened ${fmtDate(p.lastReadAt)}`
       : "Not started yet";
 
+  const coverSrc = cover ?? book.cover ?? null;
+
   return (
     <div className="library">
       <header className="topbar">
@@ -107,8 +109,8 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
       <main className="content detail-page">
         <div className="detail-layout">
           <div className="detail-cover book-cover">
-            {cover ? (
-              <img className="book-cover-img" src={cover} alt="" />
+            {coverSrc ? (
+              <img className="book-cover-img" src={coverSrc} alt="" />
             ) : book.type === "epub" ? (
               <BookOpen size={40} />
             ) : (

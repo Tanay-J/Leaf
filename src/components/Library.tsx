@@ -260,12 +260,15 @@ export default function Library({ theme, onCycleTheme }: Props) {
           skipped++;
           continue; // already have it — skip in a batch
         }
-        // Epub cover extraction (title/author come from the filename here).
+        // Epub metadata & cover extraction (falls back to filename when absent).
         let meta: Awaited<ReturnType<typeof readEpubMeta>> = null;
         if (/\.epub$/i.test(file.name)) {
           meta = await readEpubMeta(file);
         }
-        const { book } = await addLocalBook(file, sha ?? undefined);
+        const { book } = await addLocalBook(file, sha ?? undefined, {
+          title: meta?.title,
+          author: meta?.author,
+        });
         if (meta?.cover) await saveCover(book.id, meta.cover);
         added++;
       }
@@ -390,16 +393,18 @@ export default function Library({ theme, onCycleTheme }: Props) {
 
   /** Uploads one file to the vault without waiting on the deploy. */
   const uploadOneToVault = async (
-    file: File
+    file: File,
+    allowFieldOverride: boolean
   ): Promise<{ fileName: string; note: string; cover?: Blob } | null> => {
-    // Epub metadata prefill so vault uploads carry title/author for CI.
-    let title = "";
-    let author = "";
+    // Epub metadata prefill so vault uploads carry title/author for CI, with
+    // explicit Title/Author form fields overriding when uploading a single file.
+    let title = allowFieldOverride ? addTitle.trim() : "";
+    let author = allowFieldOverride ? addAuthor.trim() : "";
     let cover: Blob | undefined;
     if (/\.epub$/i.test(file.name)) {
       const meta = await readEpubMeta(file).catch(() => null);
-      title = meta?.title ?? "";
-      author = meta?.author ?? "";
+      if (!title) title = meta?.title ?? "";
+      if (!author) author = meta?.author ?? "";
       cover = meta?.cover;
     }
     const res = await uploadToVault(
@@ -436,7 +441,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
         if (files.length > 1) {
           setVaultNote(`Uploading ${i + 1} of ${files.length} to the vault…`);
         }
-        const done = await uploadOneToVault(files[i]);
+        const done = await uploadOneToVault(files[i], files.length === 1);
         if (done) uploaded.push(done);
       }
       if (uploaded.length === 0) {

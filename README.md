@@ -3,33 +3,101 @@
 A personal reading app for your EPUB and PDF books. Open a book and pick up
 right where you left off — no accounts, no uploads, no sign-in.
 
-## Your library
+---
 
-The front page is **your** shelf — only the books you've collected. Use the
-**My library / Browse** control to move between your shelf and the built-in
-catalog that ships with Leaf.
+## Quick Start (Local Use)
 
-- **Browse** — every book from the built-in catalog lives here. Click **+** on
-  a card to pin it to your library, or ✓ again to unpin; you can open and read
-  anything without adding it first.
-- **Add a book** — click **Add book** and either paste a link to an EPUB/PDF
-  hosted anywhere, or choose a file from this device. Device files are stored
-  in your browser (IndexedDB) and never uploaded; removing the book deletes
-  its stored copy. You can also **upload a file to your vault** — it's
-  published on every device after the deploy (see below).
-- **Find a book** — search by title or author (scoped to whichever tab you're
-  on), switch between grid and list views, sort by recent/title/author/
-  progress, and filter My library by status (reading / finished / unopened).
-- **Open a book** — click any card to start reading.
-- **Book details** — the ⓘ button on any card opens a detail page with the
-  cover, reading status, progress, and time spent with that book.
-- **Resume reading** — every book remembers the page or chapter you were on.
-  With your vault connected, your place, pins, and "finished" marks follow
-  you across devices automatically.
-- **Reading stats** — My library quietly shows how many books you've
-  finished, how many you're reading, and your current reading streak. Open
-  **view stats** for the full dashboard: a six-month heatmap of your reading
-  time, longest streak, and weekly totals.
+### 1. Prerequisites
+- **Node.js**: v20 or higher
+- **npm**: v9 or higher
+
+### 2. Install & Start Development Server
+```bash
+git clone git@github.com:Tanay-J/Leaf.git
+cd Leaf
+npm install
+npm run dev
+```
+Open **http://localhost:5173/** in your browser.
+
+### 3. Local Book Encryption & Vault Catalog
+Book files in `public/books/` are gitignored to keep media out of repository history.
+
+To encrypt local books for testing or offline reading:
+```bash
+# Place your .epub or .pdf files inside public/books/
+BOOKS_PASSPHRASE="your-passphrase" npm run encrypt-books
+```
+This script (`scripts/encrypt-books.mjs`):
+1. Derives an AES-256-GCM key with PBKDF2 (310,000 iterations).
+2. Encrypts each book into `public/books/<name>.enc`.
+3. Extracts embedded covers into `public/books/covers/`.
+4. Writes the catalog manifest to `public/books/catalog.json`.
+
+> **Local Dev Remote Fallback:** When running locally (`http://localhost:5173`), if a book from `catalog.json` isn't present in your local `public/books/`, Leaf automatically fetches the ciphertext from your live GitHub Pages deployment and decrypts it with your passphrase.
+
+### 4. Build for Production
+```bash
+npm run build
+```
+This runs TypeScript checking (`tsc`), compiles Vite bundles to `dist/`, and runs `scripts/prune-plain-books.mjs` to ensure unencrypted files never enter `dist/`.
+
+Preview the production build locally:
+```bash
+npm run preview
+```
+
+---
+
+## App Layout & Architecture
+
+### 1. Landing Page — 3-Pane Studio Workbench
+The library interface provides a desktop-class studio workbench:
+- **Left Rail**:
+  - **Workspace navigation**: Quick links to *My Shelf*, *Browse Vault*, *Reading List* (with unread article badge), and *Activity & Stats* (with live reading streak).
+  - **Status filters**: Filter your books by *All*, *In Progress*, *Finished*, or *Unopened* with live counts.
+  - **Add or Drop Book**: Quick file selector modal or drop any EPUB/PDF directly onto the window.
+- **Center Shelf**:
+  - **Search & Sort**: Filter books by title or author; sort by Recent, Title, Author, or Progress.
+  - **Table / 2:3 Cover Grid View**: High-density table view with progress bars or visual 2:3 cover cards.
+  - **Quick Vault Actions**: Move any book to *My Shelf* with the `+ Shelf` / `✓ On Shelf` button, or use `+ Pin All to Shelf` in the command bar.
+  - **Continue Reading Banner**: One-click resume card at the top of your shelf.
+- **Right Persistent Inspector**:
+  - Real-time details for the selected book without leaving the shelf.
+  - Cover preview, inline title/author metadata editing, reading time stats, and finish/resume toggles.
+  - Live list of saved **Highlights & Bookmarks** with click-to-jump and **Copy as Markdown**.
+
+### 2. Reader — Studio Docked Frame
+A balanced, distraction-free reading environment:
+- **Docked Left Rail**: Full-height drawer for the Table of Contents and saved notes, with a `← Back to Shelf` shortcut. Toggle with <kbd>S</kbd>.
+- **Symmetric Top Header**: Centered book title and author, clean segmented `[ 1-Page | 2-Page ]` spread switcher, bookmark toggle, search, typography menu, and theme switcher.
+- **Elevated Book Sheet**: Centered reading sheet (`.studio-sheet`) that smoothly widens in 2-page spread mode with a subtle book spine crease divider.
+- **Integrated Docked Footer**: Docked bottom navigation bar with `‹ Previous` and `Next ›` controls, reading progress bar, and percentage readout.
+- **Focus / Zen Mode**: Press <kbd>Z</kbd> or click the maximize button to collapse all bars and focus purely on reading. Press <kbd>Esc</kbd> or <kbd>Z</kbd> to exit.
+
+---
+
+## Reading Features
+
+### EPUB & PDF Support
+- **Page Layout**: Switch between **1-Page** and **2-Page Spread** view on both EPUBs and PDFs. EPUBs also support continuous scroll mode via the Typography menu.
+- **Keyboard Navigation**:
+  - `←` / `→` or `J` / `K`: Turn pages
+  - `Space` / `Shift+Space`: Next / previous page
+  - `B`: Toggle bookmark on the current page or chapter
+  - `S`: Toggle sidebar (Contents & Notes)
+  - `Z`: Toggle focus mode
+  - `F`: Fullscreen
+  - `?`: Open shortcut cheat sheet
+- **Typography & Dark Reading**:
+  - Adjust font size, line spacing, and choose font families (Literata, Georgia, Palatino, Baskerville, Charter, Sans-serif).
+  - Cycle themes with the theme button: **Light → Sepia → Dark**. Sepia injects paper warm tints, and Dark mode inverts PDF and EPUB page content for night reading.
+- **Bookmarks & Highlights**:
+  - Press <kbd>B</kbd> to bookmark any page or chapter.
+  - Select text in EPUBs to highlight passages or copy them to clipboard.
+  - All highlights and bookmarks appear under the **Saved** sidebar tab and in the Library Inspector, with a one-click **Copy as Markdown** button.
+
+---
 
 ## Adding books to the site
 
@@ -60,85 +128,36 @@ before being published.
 New books then show up under **Browse** automatically; pin them to your
 shelf with **+**.
 
-## Reading
+---
+
+## Passphrase Protection & Security
 
 The built-in catalog is **passphrase-protected**: books are deployed as
 encrypted files, and the reader asks for the library passphrase **once per
-session** when you first open any catalog book. Enter it and every book unlocks
-for that browser session. Your own device-added books are never encrypted —
-they never leave your browser.
+session** when you first open any catalog book.
+- Enter your passphrase and check **Remember on this device** to persist it in `localStorage` across visits.
+- Device-local books added via file picker or drag-and-drop are stored securely in IndexedDB and are never encrypted or uploaded.
 
-**EPUB**
-- Turn pages with the **Prev / Next** buttons or the **← / → arrow keys**.
-- Use the **Contents** panel to jump to any chapter.
-- **Search** — the magnifier in the reader toolbar searches inside the book
-  (EPUBs and PDFs); click a result to jump to that chapter or page.
-- Adjust **font size**, choose a **font style** (default, Literata, Georgia,
-  Palatino, Baskerville, Charter, or a sans-serif), and set the **line
-  spacing** (tight → wide) from the toolbar. Your choices are remembered
-  per book and follow you across devices with the vault connected.
-
-**PDF**
-- **Zoom in / out** to fit the page width you prefer.
-- **Jump to a page** with the page-number box at the bottom.
-- The **Contents** panel shows bookmarks when the PDF has them.
+---
 
 ## Reading list
 
 A funnel for things you found online but want to read later — web pages, not
 books.
 
-- **Open it** — the **Reading list** button in the Library top bar (the badge
-  shows how many unread articles you have).
+- **Open it** — the **Reading list** button in the Library rail or top bar.
 - **Add an article** — paste a link at the top of the page, or drag the
-  **Save to Leaf** bookmark to your browser’s bookmarks bar; clicking it on
-  any website saves that page instantly.
-- **Read** — tap an article. Use the **− / +** buttons to change the text size,
-  the dropdowns for **font style** and **line spacing**, and **Open original**
-  to see it on the source site. Opening an article marks
-  it as read (the unread dot clears).
-- **Remove** — use the trash icon on any row.
-- **Organize** — star favorites, archive finished items, and add tags; the
-  chips at the top filter the list. Articles you open are cached in your
-  browser, so re-reading works offline.
+  **Save to Leaf** bookmarklet to your browser’s bookmarks bar.
+- **Read** — tap an article. Adjust font styles, spacing, and font size.
+- **Sync across devices** — sync via your vault (`sync` branch) or GitHub Gist.
 
-Articles stay in your browser, just like reading progress.
+---
 
-### Sync across devices
+## Privacy & Backups
 
-Your reading list can follow you across browsers and computers.
+Everything — reading progress, font preferences, bookmarks, and theme — stays in
+your browser. Nothing is uploaded or shared without explicit token configuration.
 
-**Easiest — through your vault:** if you've connected your vault (book
-uploads), open the Reading list and click **Sync via my vault**. No token,
-no setup — the list syncs through your vault on every connected device.
-
-**Classic — through a GitHub Gist:**
-
-1. Create a **classic** personal access token with only the **`gist`** scope
-   (GitHub → Settings → Developer settings → Personal access tokens → Tokens
-   (classic)).
-2. On the Reading list page, paste the token into the **Sync across devices**
-   card and connect.
-3. Do the same on your other devices. The first device creates the gist; the
-   rest find it automatically from your account.
-
-- Your list syncs automatically after you add, read, or remove an article, and
-  on each visit. Use **Sync now** to force a refresh.
-- Reading state and titles sync too. Removing an article deletes it everywhere.
-- The token is stored in your browser only and can be revoked at any time.
-  Deleting the Gist stops sync but never touches your local copy.
-
-## Appearance
-
-The theme button cycles **Light → Sepia → Dark**. Dark mode is easier on the
-eyes at night, and your choice is remembered.
-
-## Privacy
-
-Everything — reading progress, font preferences, and the theme — stays in
-your browser. Nothing is uploaded or shared.
-
-The **Sync & backup** card at the bottom of My library shows the status of
-every sync (vault, progress & pins, reading list) and can **export** your
-whole library as a JSON backup — settings, progress, pins, and stats — or
-restore one. GitHub tokens are never included in a backup.
+The **Sync & backup** card at the bottom of the Library rail allows you to
+**export** your entire library state (progress, pins, highlights, bookmarks, reading streak)
+as a single JSON backup file and restore it on any browser. Tokens are never included in backups.

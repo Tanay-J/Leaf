@@ -37,8 +37,11 @@ export const USER_BOOKS_CHANGED_EVENT = "leaf:user-books-changed";
 
 /** Backfills sync fields on old entries so merges stay stable. */
 function normalize(b: UserBook): UserBook {
+  const cat = getCatalog().find((c) => c.id === b.id);
   return {
     ...b,
+    ...(cat?.cover && !b.cover ? { cover: cat.cover } : {}),
+    ...(cat?.author && !b.author ? { author: cat.author } : {}),
     pinnedAt: b.pinnedAt ?? b.addedAt,
     removedAt: b.removedAt ?? null,
     updatedAt: b.updatedAt ?? b.addedAt,

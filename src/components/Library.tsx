@@ -8,27 +8,45 @@ import {
   type FormEvent,
 } from "react";
 import {
+  Activity,
+  Bookmark,
   BookOpen,
   Check,
   CloudUpload,
   Compass,
+  Copy,
   FileText,
   FolderOpen,
+  Highlighter,
   Info,
   LayoutGrid,
   Link,
   List,
   Loader2,
   Newspaper,
+  Pencil,
   Play,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   X,
 } from "lucide-react";
 import { getCatalog, loadCatalog, reloadCatalog, type Book } from "../books";
 import { loadArticles } from "../articles";
-import { loadAllProgress, loadProgress, navigate, readDays, useLibraryView, type Theme } from "../lib";
+import {
+  bookSecondsMap,
+  loadAllProgress,
+  loadProgress,
+  navigate,
+  PROGRESS_SAVED_EVENT,
+  readDays,
+  saveProgress,
+  useLibraryView,
+  type BookmarkItem,
+  type HighlightItem,
+  type Theme,
+} from "../lib";
 import ThemeButton from "./ThemeButton";
 import SyncCard from "./SyncCard";
 import { findKeyBySha, hashBlob, loadCover, saveCover } from "../localBooks";
@@ -41,6 +59,7 @@ import {
   addLocalBook,
   pinBook,
   removeUserBook,
+  updateBookMeta,
   USER_BOOKS_CHANGED_EVENT,
   type BookType,
 } from "../userBooks";
@@ -161,7 +180,10 @@ export default function Library({ theme, onCycleTheme }: Props) {
   useEffect(() => {
     let alive = true;
     loadCatalog().then((list) => {
-      if (alive) setCatalog(list);
+      if (alive) {
+        setCatalog(list);
+        setBooks(getMyLibrary());
+      }
     });
     return () => {
       alive = false;
@@ -171,6 +193,12 @@ export default function Library({ theme, onCycleTheme }: Props) {
   /* Browse renders the vault-published catalog, falling back to the static
      src/books.ts list until books/catalog.json is available. */
   const mineIds = useMemo(() => new Set(books.map((b) => b.id)), [books]);
+  const catalogCoverMap = useMemo(
+    () => new Map(catalog.map((b) => [b.id, b.cover])),
+    [catalog]
+  );
+  const resolveCover = (b: Book): string | null =>
+    covers[b.id] ?? b.cover ?? catalogCoverMap.get(b.id) ?? null;
 
   /* Per-tab, query-filtered lists — each tab badge shows its own live count
      (previously the trailing badge always mirrored whichever tab was open). */
@@ -586,9 +614,115 @@ export default function Library({ theme, onCycleTheme }: Props) {
     setWatchBusy(false);
   };
 
-return (
+  /* ---- 3-Pane Studio Inspector state ---- */
+  const [, setProgressTick] = useState(0);
+  useEffect(() => {
+    const onProg = () => {
+      setProgressTick((n) => n + 1);
+      setStats(readingStats());
+    };
+    window.addEventListener(PROGRESS_SAVED_EVENT, onProg);
+    return () => window.removeEventListener(PROGRESS_SAVED_EVENT, onProg);
+  }, []);
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedBook = useMemo<Book | null>(() => {
+    const all = [...books, ...catalog.filter((b) => !mineIds.has(b.id))];
+    if (selectedId) {
+      const found = all.find((b) => b.id === selectedId);
+      if (found) return found;
+    }
+    return shown[0] ?? continueBook ?? books[0] ?? catalog[0] ?? null;
+  }, [selectedId, shown, continueBook, books, catalog, mineIds]);
+
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editAuthor, setEditAuthor] = useState("");
+  const [copiedNotes, setCopiedNotes] = useState(false);
+
+  useEffect(() => {
+    setEditingMeta(false);
+    setCopiedNotes(false);
+  }, [selectedBook?.id]);
+
+  const statusCounts = useMemo(() => {
+    let reading = 0;
+    let finished = 0;
+    let unopened = 0;
+    for (const b of books) {
+      const p = loadProgress(b.id);
+      if (p.finishedAt) finished++;
+      else if (p.lastReadAt) reading++;
+      else unopened++;
+    }
+    return { all: books.length, reading, finished, unopened };
+  }, [books]);
+
+  const formatDuration = (sec: number): string => {
+    if (!sec || sec < 60) return "Just started";
+    const hrs = Math.floor(sec / 3600);
+    const mins = Math.round((sec % 3600) / 60);
+    if (hrs === 0) return `${mins}m`;
+    return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+  };
+
+  const jumpToBookmark = (book: Book, bm: BookmarkItem) => {
+    if (bm.cfi) {
+      saveProgress(book.id, { cfi: bm.cfi, chapter: bm.label });
+    } else if (bm.page) {
+      saveProgress(book.id, { page: bm.page });
+    }
+    navigate(`#/book/${encodeURIComponent(book.id)}`);
+  };
+
+  const jumpToHighlight = (book: Book, hl: HighlightItem) => {
+    saveProgress(book.id, { cfi: hl.cfiRange, chapter: hl.chapter });
+    navigate(`#/book/${encodeURIComponent(book.id)}`);
+  };
+
+  const deleteBookmarkItem = (book: Book, id: string) => {
+    const p = loadProgress(book.id);
+    const next = (p.bookmarks ?? []).filter((b) => b.id !== id);
+    saveProgress(book.id, { bookmarks: next });
+  };
+
+  const deleteHighlightItem = (book: Book, id: string) => {
+    const p = loadProgress(book.id);
+    const next = (p.highlights ?? []).filter((h) => h.id !== id);
+    saveProgress(book.id, { highlights: next });
+  };
+
+  const copySelectedNotesMarkdown = (book: Book) => {
+    const p = loadProgress(book.id);
+    const bms = p.bookmarks ?? [];
+    const hls = p.highlights ?? [];
+    const lines: string[] = [`# ${book.title}`];
+    if (book.author) lines.push(`*by ${book.author}*`);
+    lines.push("");
+    if (hls.length > 0) {
+      lines.push("## Highlights", "");
+      for (const h of hls) {
+        lines.push(`> ${h.text.replace(/\n+/g, " ")}`);
+        if (h.chapter) lines.push(`> — *${h.chapter}*`);
+        lines.push("");
+      }
+    }
+    if (bms.length > 0) {
+      lines.push("## Bookmarks", "");
+      for (const bm of bms) {
+        lines.push(`- ${bm.label}`);
+      }
+      lines.push("");
+    }
+    void navigator.clipboard?.writeText(lines.join("\n")).then(() => {
+      setCopiedNotes(true);
+      window.setTimeout(() => setCopiedNotes(false), 1800);
+    });
+  };
+
+  return (
     <div
-      className="library"
+      className="library studio-library"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -603,415 +737,804 @@ return (
           </div>
         </div>
       )}
-      <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark">
-            <BookOpen size={20} />
+
+      <div className="studio-shell">
+        {/* LEFT RAIL: Workspace & Filters */}
+        <aside className="studio-rail">
+          <div className="studio-brand">
+            <div className="brand-mark">
+              <BookOpen size={18} />
+            </div>
+            <div className="brand-text">
+              <span className="eyebrow">Personal Reader</span>
+              <h1>Leaf</h1>
+            </div>
           </div>
-          <div className="brand-text">
-            <span className="eyebrow">Personal reader</span>
-            <h1>Leaf</h1>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <div className="search-shell">
-            <Search size={15} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={tab === "mine" ? "Search your books…" : "Search the catalog…"}
-            />
-          </div>
-          <div className="view-toggle" role="group" aria-label="View mode">
+
+          <div className="studio-nav-group">
+            <span className="studio-nav-label">Workspace</span>
             <button
-              className={`view-btn${view === "grid" ? " active" : ""}`}
-              onClick={() => setView("grid")}
-              title="Grid view"
+              type="button"
+              className={`studio-nav-btn${tab === "mine" ? " active" : ""}`}
+              onClick={() => setTab("mine")}
             >
-              <LayoutGrid size={15} />
+              <BookOpen size={15} />
+              <span>My Shelf</span>
+              <span className="studio-nav-count">{books.length}</span>
             </button>
             <button
-              className={`view-btn${view === "list" ? " active" : ""}`}
-              onClick={() => setView("list")}
-              title="List view"
+              type="button"
+              className={`studio-nav-btn${tab === "browse" ? " active" : ""}`}
+              onClick={() => setTab("browse")}
             >
-              <List size={15} />
+              <Compass size={15} />
+              <span>Browse Vault</span>
+              <span className="studio-nav-count">{catalog.length}</span>
             </button>
-          </div>
-          <button
-            className="secondary-action"
-            onClick={() => setShowAdd(true)}
-            title="Add a book to your library"
-          >
-            <Plus size={15} />
-            Add book
-          </button>
-          <button
-            className="secondary-action"
-            onClick={() => navigate("#/articles")}
-            title="Your reading list"
-          >
-            <Newspaper size={15} />
-            Reading list
-            {unreadArticles > 0 && (
-              <span className="nav-badge">{unreadArticles}</span>
-            )}
-          </button>
-          <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
-        </div>
-      </header>
-
-      <main className="content">
-        {tab === "mine" &&
-          continueBook &&
-          query.trim() === "" &&
-          statusFilter === "all" && (() => {
-            const cProg = progressInfo(continueBook);
-            const cCover = covers[continueBook.id] ?? continueBook.cover ?? null;
-            return (
-              <div className="continue-hero">
-                <button
-                  type="button"
-                  className="continue-card"
-                  onClick={() =>
-                    navigate(`#/book/${encodeURIComponent(continueBook.id)}`)
-                  }
-                >
-                  <div className="continue-cover">
-                    {cCover ? (
-                      <img src={cCover} alt="" className="book-cover-img" />
-                    ) : continueBook.type === "epub" ? (
-                      <BookOpen size={24} />
-                    ) : (
-                      <FileText size={24} />
-                    )}
-                  </div>
-                  <div className="continue-body">
-                    <span className="continue-eyebrow">Continue reading</span>
-                    <strong>{continueBook.title}</strong>
-                    {continueBook.author && (
-                      <span className="continue-author">{continueBook.author}</span>
-                    )}
-                    {cProg.label && (
-                      <div className="continue-progress">
-                        <span>{cProg.label}</span>
-                        {cProg.pct !== null && (
-                          <div className="progress-track">
-                            <span
-                              style={{ width: `${Math.round(cProg.pct * 100)}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <span className="continue-cta">
-                    <Play size={14} />
-                    Resume
-                  </span>
-                </button>
-              </div>
-            );
-          })()}
-
-        {tab === "mine" && (stats.finished > 0 || stats.inProgress > 0) && (
-          <p className="reading-stats">
-            {stats.finished} finished · {stats.inProgress} in progress
-            {stats.streak > 1 ? ` · 🔥 ${stats.streak}-day streak` : ""}
             <button
-              className="link-btn stats-link"
+              type="button"
+              className="studio-nav-btn"
+              onClick={() => navigate("#/articles")}
+            >
+              <Newspaper size={15} />
+              <span>Reading List</span>
+              {unreadArticles > 0 && (
+                <span className="studio-nav-count accent">{unreadArticles}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              className="studio-nav-btn"
               onClick={() => navigate("#/stats")}
-              title="Open the full stats dashboard"
             >
-              view stats
+              <Activity size={15} />
+              <span>Activity & Stats</span>
+              {stats.streak > 0 && (
+                <span className="studio-nav-count">🔥 {stats.streak}d</span>
+              )}
             </button>
-          </p>
-        )}
+          </div>
 
-        <div className="library-tabs" role="tablist" aria-label="Choose which collection is shown">
-          <button
-            role="tab"
-            aria-selected={tab === "mine"}
-            className={`tab-btn${tab === "mine" ? " active" : ""}`}
-            onClick={() => setTab("mine")}
-            title="Books you've collected"
-          >
-            <BookOpen size={14} />
-            My library
-            <span className="tab-count">{mineFiltered.length}</span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "browse"}
-            className={`tab-btn${tab === "browse" ? " active" : ""}`}
-            onClick={() => setTab("browse")}
-            title="The built-in catalog shipped with Leaf"
-          >
-            <Compass size={14} />
-            Browse
-            <span className="tab-count">{catalogFiltered.length}</span>
-          </button>
-        </div>
-
-        <div className="library-controls">
           {tab === "mine" && (
-            <div className="filter-chips">
+            <div className="studio-nav-group">
+              <span className="studio-nav-label">Status Filter</span>
               {(["all", "reading", "finished", "unopened"] as const).map((f) => (
                 <button
                   key={f}
-                  className={`filter-chip${statusFilter === f ? " active" : ""}`}
+                  type="button"
+                  className={`studio-nav-btn${statusFilter === f ? " active" : ""}`}
                   onClick={() => setStatusFilter(f)}
                 >
-                  {f === "all"
-                    ? "All"
-                    : f === "reading"
-                      ? "Reading"
-                      : f === "finished"
-                        ? "Finished"
-                        : "Unopened"}
+                  <span className={`studio-dot dot-${f}`} />
+                  <span>
+                    {f === "all"
+                      ? "All Books"
+                      : f === "reading"
+                        ? "In Progress"
+                        : f === "finished"
+                          ? "Finished"
+                          : "Unopened"}
+                  </span>
+                  <span className="studio-nav-count">{statusCounts[f]}</span>
                 </button>
               ))}
             </div>
           )}
-          <select
-            className="control-select sort-select"
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            title="Sort order"
-            aria-label="Sort order"
-          >
-            <option value="recent">Sort: Recent</option>
-            <option value="title">Sort: Title</option>
-            <option value="author">Sort: Author</option>
-            <option value="progress">Sort: Progress</option>
-          </select>
-        </div>
 
-        {shown.length === 0 ? (
-          <div className="empty-state">
-            <BookOpen size={28} />
-            <p>
-              {query.trim() !== ""
-                ? "No books match your search."
-                : tab === "mine"
-                  ? "Your library is empty — pin books from the catalog or add one by link."
-                  : "No books match your search."}
-            </p>
-            {tab === "mine" && query.trim() === "" && (
-              <div className="empty-actions">
+          <div className="studio-rail-footer">
+            <button
+              type="button"
+              className="studio-add-cta"
+              onClick={() => setShowAdd(true)}
+            >
+              <Plus size={15} />
+              Add or Drop Book
+            </button>
+            <div className="studio-sync-wrap">
+              <SyncCard />
+            </div>
+          </div>
+        </aside>
+
+        {/* CENTER PANE: Command Bar & Shelf / Table */}
+        <main className="studio-center">
+          <header className="studio-cmdbar">
+            <div className="studio-search">
+              <Search size={15} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={
+                  tab === "mine"
+                    ? "Filter shelf by title or author…"
+                    : "Search vault catalog…"
+                }
+              />
+              {query && (
                 <button
-                  className="add-article-btn"
-                  onClick={() => setTab("browse")}
+                  type="button"
+                  className="studio-search-clear"
+                  onClick={() => setQuery("")}
+                  title="Clear search"
                 >
-                  <Compass size={15} />
-                  Browse main library
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            <div className="studio-cmd-actions">
+              {tab === "browse" && shown.some((b) => !mineIds.has(b.id)) && (
+                <button
+                  type="button"
+                  className="studio-open-btn"
+                  onClick={() => {
+                    for (const b of shown) {
+                      if (!mineIds.has(b.id)) pinBook(b);
+                    }
+                  }}
+                  title="Move all shown vault books to My Shelf"
+                >
+                  <Plus size={13} />
+                  Pin All to Shelf
+                </button>
+              )}
+
+              <select
+                className="control-select sort-select"
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+                title="Sort order"
+                aria-label="Sort order"
+              >
+                <option value="recent">Sort: Recent</option>
+                <option value="title">Sort: Title</option>
+                <option value="author">Sort: Author</option>
+                <option value="progress">Sort: Progress</option>
+              </select>
+
+              <div className="view-toggle" role="group" aria-label="View mode">
+                <button
+                  type="button"
+                  className={`view-btn${view === "list" ? " active" : ""}`}
+                  onClick={() => setView("list")}
+                  title="Table view"
+                >
+                  <List size={15} />
                 </button>
                 <button
-                  className="secondary-action"
-                  onClick={() => setShowAdd(true)}
+                  type="button"
+                  className={`view-btn${view === "grid" ? " active" : ""}`}
+                  onClick={() => setView("grid")}
+                  title="Cover grid view"
                 >
-                  <Plus size={15} />
-                  Add book link
+                  <LayoutGrid size={15} />
                 </button>
+              </div>
+
+              <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
+            </div>
+          </header>
+
+          {/* Mobile quick navigation strip (visible when left rail collapses) */}
+          <div className="studio-mobile-bar">
+            <div className="studio-mobile-tabs">
+              <button
+                type="button"
+                className={`filter-chip${tab === "mine" ? " active" : ""}`}
+                onClick={() => setTab("mine")}
+              >
+                My Shelf ({books.length})
+              </button>
+              <button
+                type="button"
+                className={`filter-chip${tab === "browse" ? " active" : ""}`}
+                onClick={() => setTab("browse")}
+              >
+                Vault ({catalog.length})
+              </button>
+              <button
+                type="button"
+                className="filter-chip"
+                onClick={() => navigate("#/articles")}
+              >
+                Articles{unreadArticles > 0 ? ` (${unreadArticles})` : ""}
+              </button>
+              <button
+                type="button"
+                className="filter-chip"
+                onClick={() => navigate("#/stats")}
+              >
+                Stats
+              </button>
+            </div>
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => setShowAdd(true)}
+            >
+              <Plus size={14} /> Add
+            </button>
+          </div>
+
+          <div className="studio-body">
+            {tab === "mine" &&
+              continueBook &&
+              query.trim() === "" &&
+              statusFilter === "all" && (() => {
+                const cProg = progressInfo(continueBook);
+                const cCover = resolveCover(continueBook);
+                return (
+                  <div className="studio-continue-banner">
+                    <div
+                      className="studio-continue-main"
+                      onClick={() => setSelectedId(continueBook.id)}
+                    >
+                      <div className="studio-continue-cover">
+                        {cCover ? (
+                          <img src={cCover} alt="" className="book-cover-img" />
+                        ) : continueBook.type === "epub" ? (
+                          <BookOpen size={20} />
+                        ) : (
+                          <FileText size={20} />
+                        )}
+                      </div>
+                      <div className="studio-continue-info">
+                        <span className="continue-eyebrow">Continue Reading</span>
+                        <strong>{continueBook.title}</strong>
+                        <span className="studio-continue-sub">
+                          {continueBook.author ? `${continueBook.author} · ` : ""}
+                          {cProg.label || "In progress"}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="continue-cta"
+                      onClick={() =>
+                        navigate(`#/book/${encodeURIComponent(continueBook.id)}`)
+                      }
+                    >
+                      <Play size={13} />
+                      Resume
+                    </button>
+                  </div>
+                );
+              })()}
+
+            {shown.length === 0 ? (
+              <div className="empty-state">
+                <BookOpen size={28} />
+                <p>
+                  {query.trim() !== ""
+                    ? "No books match your search."
+                    : tab === "mine"
+                      ? "Your shelf is empty — pin books from the vault or drop an EPUB/PDF anywhere."
+                      : "No books match your search."}
+                </p>
+                {tab === "mine" && query.trim() === "" && (
+                  <div className="empty-actions">
+                    <button
+                      type="button"
+                      className="add-article-btn"
+                      onClick={() => setTab("browse")}
+                    >
+                      <Compass size={15} />
+                      Browse Vault Catalog
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-action"
+                      onClick={() => setShowAdd(true)}
+                    >
+                      <Plus size={15} />
+                      Add Book
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : view === "list" ? (
+              <div className="studio-table" role="listbox" aria-label="Book list">
+                <div className="studio-table-head">
+                  <span>Book</span>
+                  <span>Progress</span>
+                  <span>Format</span>
+                  <span style={{ textAlign: "right" }}>Action</span>
+                </div>
+                {shown.map((b) => {
+                  const prog = progressInfo(b);
+                  const isMine = mineIds.has(b.id);
+                  const isSelected = selectedBook?.id === b.id;
+                  const coverSrc = resolveCover(b);
+                  const pctNum = prog.pct !== null ? Math.round(prog.pct * 100) : 0;
+                  return (
+                    <div
+                      key={b.id}
+                      role="option"
+                      aria-selected={isSelected}
+                      tabIndex={0}
+                      className={`studio-row${isSelected ? " selected" : ""}`}
+                      onClick={() => setSelectedId(b.id)}
+                      onDoubleClick={() =>
+                        navigate(`#/book/${encodeURIComponent(b.id)}`)
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          navigate(`#/book/${encodeURIComponent(b.id)}`);
+                        } else if (e.key === " ") {
+                          e.preventDefault();
+                          setSelectedId(b.id);
+                        }
+                      }}
+                    >
+                      <div className="studio-row-book">
+                        <div className="studio-row-thumb">
+                          {coverSrc ? (
+                            <img src={coverSrc} alt="" />
+                          ) : b.type === "epub" ? (
+                            <BookOpen size={15} />
+                          ) : (
+                            <FileText size={15} />
+                          )}
+                        </div>
+                        <div className="studio-row-meta">
+                          <span className="studio-row-title">{b.title}</span>
+                          <span className="studio-row-author">
+                            {b.author || "Unknown author"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="studio-row-prog">
+                        <div className="studio-mini-bar">
+                          <span style={{ width: `${pctNum}%` }} />
+                        </div>
+                        <span className="studio-row-prog-text">
+                          {prog.label || "Unopened"}
+                        </span>
+                      </div>
+
+                      <div className="studio-row-badges">
+                        <span className={`studio-badge badge-${b.type}`}>
+                          {b.type}
+                        </span>
+                        {tab === "browse" && isMine && (
+                          <span className="studio-badge badge-yours">Pinned</span>
+                        )}
+                      </div>
+
+                      <div
+                        className="studio-row-actions"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          className="studio-open-btn"
+                          onClick={() =>
+                            navigate(`#/book/${encodeURIComponent(b.id)}`)
+                          }
+                          title="Open in Reader"
+                        >
+                          <Play size={12} />
+                          Read
+                        </button>
+                        {tab === "mine" ? (
+                          isMine && (
+                            <button
+                              type="button"
+                              className="mini-btn"
+                              onClick={() => remove(b.id)}
+                              title="Remove from your shelf"
+                              aria-label={`Remove ${b.title}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            type="button"
+                            className={`mini-btn${isMine ? " active-pin" : ""}`}
+                            onClick={() => togglePin(b)}
+                            title={
+                              isMine
+                                ? "Remove from your shelf"
+                                : "Pin to your shelf"
+                            }
+                          >
+                            {isMine ? <Check size={14} /> : <Plus size={14} />}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="studio-grid">
+                {shown.map((b) => {
+                  const prog = progressInfo(b);
+                  const isMine = mineIds.has(b.id);
+                  const isSelected = selectedBook?.id === b.id;
+                  const coverSrc = resolveCover(b);
+                  return (
+                    <div
+                      key={b.id}
+                      className={`studio-card${isSelected ? " selected" : ""}`}
+                      onClick={() => setSelectedId(b.id)}
+                      onDoubleClick={() =>
+                        navigate(`#/book/${encodeURIComponent(b.id)}`)
+                      }
+                    >
+                      <div className="studio-card-cover">
+                        {coverSrc ? (
+                          <img
+                            className="book-cover-img"
+                            src={coverSrc}
+                            alt=""
+                          />
+                        ) : b.type === "epub" ? (
+                          <BookOpen size={30} />
+                        ) : (
+                          <FileText size={30} />
+                        )}
+                        <span className={`pill pill-${b.type} studio-pill-left`}>
+                          {b.type}
+                        </span>
+                        {tab === "browse" ? (
+                          <button
+                            type="button"
+                            className={`studio-card-pin${isMine ? " pinned" : ""}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              togglePin(b);
+                            }}
+                            title={
+                              isMine
+                                ? "Remove from My Shelf"
+                                : "Move to My Shelf"
+                            }
+                          >
+                            {isMine ? <Check size={12} /> : <Plus size={12} />}
+                            {isMine ? "On Shelf" : "Shelf"}
+                          </button>
+                        ) : (
+                          isMine && (
+                            <button
+                              type="button"
+                              className="studio-card-remove"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                remove(b.id);
+                              }}
+                              title="Remove from My Shelf"
+                              aria-label={`Remove ${b.title}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )
+                        )}
+                        {prog.pct !== null && prog.pct > 0 && (
+                          <div className="studio-card-bar">
+                            <span
+                              style={{ width: `${Math.round(prog.pct * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          className="studio-card-play"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`#/book/${encodeURIComponent(b.id)}`);
+                          }}
+                          title="Open in Reader"
+                        >
+                          <Play size={14} />
+                          Read
+                        </button>
+                      </div>
+                      <div className="studio-card-body">
+                        <h3>{b.title}</h3>
+                        {b.author && <p>{b.author}</p>}
+                        {prog.label && (
+                          <span className="studio-card-prog">{prog.label}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        ) : view === "grid" ? (
-          <div className="book-grid">
-            {shown.map((b) => {
-              const prog = progressInfo(b);
-              const isMine = mineIds.has(b.id);
-              const coverSrc = covers[b.id] ?? b.cover ?? null;
-              return (
-                <div className="book-card-wrap" key={b.id}>
-                  <button
-                    className="book-card"
-                    onClick={() =>
-                      navigate(`#/book/${encodeURIComponent(b.id)}`)
-                    }
-                  >
-                    <div className="book-cover">
-                      {coverSrc ? (
-                        <img
-                          className="book-cover-img"
-                          src={coverSrc}
-                          alt=""
-                        />
-                      ) : b.type === "epub" ? (
-                        <BookOpen size={34} />
-                      ) : (
-                        <FileText size={34} />
-                      )}
-                      <span
-                        className={`pill pill-${b.type}${
-                          tab === "browse" ? " pill-tucked" : ""
-                        }`}
-                      >
-                        {b.type}
+        </main>
+
+        {/* RIGHT INSPECTOR PANE */}
+        <aside className="studio-inspector">
+          {selectedBook ? (() => {
+            const selProg = progressInfo(selectedBook);
+            const rawProg = loadProgress(selectedBook.id);
+            const isMine = mineIds.has(selectedBook.id);
+            const selCover = resolveCover(selectedBook);
+            const secs = bookSecondsMap()[selectedBook.id] ?? 0;
+            const bookmarks = rawProg.bookmarks ?? [];
+            const highlights = rawProg.highlights ?? [];
+            const pctVal =
+              selProg.pct !== null ? Math.round(selProg.pct * 100) : 0;
+
+            return (
+              <div className="inspector-content">
+                <div className="inspector-top">
+                  <div className="inspector-cover">
+                    {selCover ? (
+                      <img src={selCover} alt="" className="book-cover-img" />
+                    ) : selectedBook.type === "epub" ? (
+                      <BookOpen size={28} />
+                    ) : (
+                      <FileText size={28} />
+                    )}
+                  </div>
+                  <div className="inspector-title-col">
+                    <div className="inspector-badges">
+                      <span className={`studio-badge badge-${selectedBook.type}`}>
+                        {selectedBook.type}
                       </span>
                       {isMine && (
-                        <span className="pill pill-yours">Yours</span>
+                        <span className="studio-badge badge-yours">
+                          On Shelf
+                        </span>
                       )}
                     </div>
-                    <div className="book-body">
-                      <h3>{b.title}</h3>
-                      {b.author && <p className="book-author">{b.author}</p>}
-                      {prog.label && (
-                        <div className="book-progress">
-                          <span>{prog.label}</span>
-                          {prog.pct !== null && (
-                            <div className="progress-track">
-                              <span
-                                style={{ width: `${Math.round(prog.pct * 100)}%` }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                  <button
-                    className="card-remove card-info"
-                    onClick={() =>
-                      navigate(`#/detail/${encodeURIComponent(b.id)}`)
-                    }
-                    title="Book details"
-                    aria-label={`Details for ${b.title}`}
-                  >
-                    <Info size={14} />
-                  </button>
-                  {tab === "mine" ? (
-                    isMine && (
-                      <button
-                        className="card-remove"
-                        onClick={() => remove(b.id)}
-                        title="Remove from your library"
-                        aria-label={`Remove ${b.title}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )
-                  ) : (
-                    <button
-                      className={`card-add${isMine ? " added" : ""}`}
-                      onClick={() => togglePin(b)}
-                      title={
-                        isMine
-                          ? "Remove from your library"
-                          : "Add to your library"
-                      }
-                      aria-label={
-                        (isMine ? "Remove " : "Add ") +
-                        b.title +
-                        (isMine ? " from" : " to") +
-                        " your library"
-                      }
-                    >
-                      {isMine ? <Check size={15} /> : <Plus size={15} />}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="book-list">
-            {shown.map((b) => {
-              const prog = progressInfo(b);
-              const isMine = mineIds.has(b.id);
-              const coverSrc = covers[b.id] ?? b.cover ?? null;
-              return (
-                <div className="book-list-row-wrap" key={b.id}>
-                  <button
-                    className="book-list-row"
-                    onClick={() =>
-                      navigate(`#/book/${encodeURIComponent(b.id)}`)
-                    }
-                  >
-                    <div className="book-list-icon">
-                      {coverSrc ? (
-                        <img
-                          className="book-list-cover"
-                          src={coverSrc}
-                          alt=""
-                        />
-                      ) : b.type === "epub" ? (
-                        <BookOpen size={18} />
-                      ) : (
-                        <FileText size={18} />
-                      )}
-                    </div>
-                    <div className="book-list-main">
-                      <span className="book-list-title">{b.title}</span>
-                      {b.author && (
-                        <span className="book-list-author">{b.author}</span>
-                      )}
-                    </div>
-                    {prog.label && (
-                      <span className="book-list-progress">{prog.label}</span>
-                    )}
-                    <span
-                      className={`pill pill-${b.type}${
-                        tab === "browse" ? " pill-tucked" : ""
-                      }`}
-                    >
-                      {b.type}
-                    </span>
-                    {isMine && <span className="book-list-yours">Yours</span>}
-                  </button>
-                  <button
-                    className="mini-btn card-info-list"
-                    onClick={() =>
-                      navigate(`#/detail/${encodeURIComponent(b.id)}`)
-                    }
-                    title="Book details"
-                    aria-label={`Details for ${b.title}`}
-                  >
-                    <Info size={14} />
-                  </button>
-                  {tab === "mine" ? (
-                    isMine && (
-                      <button
-                        className="card-remove"
-                        onClick={() => remove(b.id)}
-                        title="Remove from your library"
-                        aria-label={`Remove ${b.title}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )
-                  ) : (
-                    <button
-                      className={`card-add${isMine ? " added" : ""}`}
-                      onClick={() => togglePin(b)}
-                      title={
-                        isMine
-                          ? "Remove from your library"
-                          : "Add to your library"
-                      }
-                      aria-label={
-                        (isMine ? "Remove " : "Add ") +
-                        b.title +
-                        (isMine ? " from" : " to") +
-                        " your library"
-                      }
-                    >
-                      {isMine ? <Check size={15} /> : <Plus size={15} />}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <p className="footnote">
-          {tab === "mine"
-            ? "Your picks are kept in this browser. Open Browse to pull more in from the built-in catalog."
-            : "The catalog shipped with Leaf — “Yours” marks what you’ve collected. Click the toggle on any card to add or remove it."}
-        </p>
 
-        <SyncCard />
-      </main>
+                    {editingMeta ? (
+                      <form
+                        className="inspector-edit-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (!editTitle.trim()) return;
+                          updateBookMeta(selectedBook, {
+                            title: editTitle.trim(),
+                            author: editAuthor.trim(),
+                          });
+                          setEditingMeta(false);
+                        }}
+                      >
+                        <input
+                          type="text"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          placeholder="Book title"
+                          autoFocus
+                          required
+                        />
+                        <input
+                          type="text"
+                          value={editAuthor}
+                          onChange={(e) => setEditAuthor(e.target.value)}
+                          placeholder="Author (optional)"
+                        />
+                        <div className="inspector-edit-btns">
+                          <button type="submit" className="studio-open-btn">
+                            <Check size={12} /> Save
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-action"
+                            onClick={() => setEditingMeta(false)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="inspector-heading-row">
+                          <h2>{selectedBook.title}</h2>
+                          <button
+                            type="button"
+                            className="mini-btn"
+                            onClick={() => {
+                              setEditTitle(selectedBook.title);
+                              setEditAuthor(selectedBook.author ?? "");
+                              setEditingMeta(true);
+                            }}
+                            title="Edit title & author"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        </div>
+                        <p className="inspector-author">
+                          {selectedBook.author || "Unknown author"}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="inspector-cta-row">
+                  <button
+                    type="button"
+                    className="inspector-primary-btn"
+                    onClick={() =>
+                      navigate(`#/book/${encodeURIComponent(selectedBook.id)}`)
+                    }
+                  >
+                    <Play size={15} />
+                    {rawProg.lastReadAt ? "Resume Reading" : "Open in Reader"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() =>
+                      navigate(`#/detail/${encodeURIComponent(selectedBook.id)}`)
+                    }
+                    title="Full book detail page"
+                  >
+                    <Info size={14} />
+                  </button>
+                  {isMine ? (
+                    <button
+                      type="button"
+                      className="secondary-action"
+                      onClick={() => remove(selectedBook.id)}
+                      title="Remove from your shelf"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary-action"
+                      onClick={() => togglePin(selectedBook)}
+                      title="Pin to your shelf"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="inspector-card">
+                  <div className="inspector-card-row">
+                    <span>Reading Progress</span>
+                    <strong>{selProg.label || "Unopened"}</strong>
+                  </div>
+                  <div className="progress-track">
+                    <span style={{ width: `${pctVal}%` }} />
+                  </div>
+                  <div className="inspector-stats-grid">
+                    <div>
+                      <small>Time Read</small>
+                      <strong>{formatDuration(secs)}</strong>
+                    </div>
+                    <div>
+                      <small>Status</small>
+                      <strong>
+                        {rawProg.finishedAt
+                          ? "Finished"
+                          : rawProg.lastReadAt
+                            ? "In Progress"
+                            : "Unopened"}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="inspector-status-actions">
+                    {rawProg.finishedAt ? (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() =>
+                          saveProgress(selectedBook.id, {
+                            finishedAt: undefined,
+                          })
+                        }
+                      >
+                        <RotateCcw size={12} /> Mark as reading
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() =>
+                          saveProgress(selectedBook.id, {
+                            finishedAt: Date.now(),
+                            pct: 1,
+                          })
+                        }
+                      >
+                        <Check size={12} /> Mark as finished
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="inspector-notes">
+                  <div className="inspector-notes-head">
+                    <span className="studio-nav-label">
+                      Saved Highlights & Bookmarks (
+                      {highlights.length + bookmarks.length})
+                    </span>
+                    {highlights.length + bookmarks.length > 0 && (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() => copySelectedNotesMarkdown(selectedBook)}
+                        title="Copy all as Markdown"
+                      >
+                        {copiedNotes ? <Check size={12} /> : <Copy size={12} />}
+                        {copiedNotes ? "Copied" : "Markdown"}
+                      </button>
+                    )}
+                  </div>
+
+                  {highlights.length === 0 && bookmarks.length === 0 ? (
+                    <p className="inspector-empty-notes">
+                      Select text inside the reader to highlight passages, or
+                      press <kbd>B</kbd> to bookmark a page.
+                    </p>
+                  ) : (
+                    <div className="inspector-notes-list">
+                      {highlights.map((hl) => (
+                        <div key={hl.id} className="inspector-note-card">
+                          <button
+                            type="button"
+                            className="inspector-note-jump"
+                            onClick={() => jumpToHighlight(selectedBook, hl)}
+                          >
+                            <span className="inspector-note-tag">
+                              <Highlighter size={11} />
+                              {hl.chapter || "Highlight"}
+                            </span>
+                            <blockquote>“{hl.text}”</blockquote>
+                          </button>
+                          <button
+                            type="button"
+                            className="note-del-btn"
+                            onClick={() =>
+                              deleteHighlightItem(selectedBook, hl.id)
+                            }
+                            title="Delete highlight"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+
+                      {bookmarks.map((bm) => (
+                        <div key={bm.id} className="inspector-note-card">
+                          <button
+                            type="button"
+                            className="inspector-note-jump"
+                            onClick={() => jumpToBookmark(selectedBook, bm)}
+                          >
+                            <span className="inspector-note-tag">
+                              <Bookmark size={11} />
+                              Bookmark
+                            </span>
+                            <strong>{bm.label}</strong>
+                          </button>
+                          <button
+                            type="button"
+                            className="note-del-btn"
+                            onClick={() =>
+                              deleteBookmarkItem(selectedBook, bm.id)
+                            }
+                            title="Delete bookmark"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })() : (
+            <div className="inspector-empty">
+              <BookOpen size={24} />
+              <p>Select any book to inspect its progress, metadata, and notes.</p>
+            </div>
+          )}
+        </aside>
+      </div>
 
       {showAdd && (
         <div

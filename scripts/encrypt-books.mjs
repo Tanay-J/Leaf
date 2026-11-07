@@ -267,6 +267,17 @@ function extractEpubCover(buf) {
         /<meta\b[^>]*content="([^"]+)"[^>]*name="cover"/.exec(opf)?.[1];
       if (metaCover) item = items.get(metaCover) ?? null;
     }
+    if (!item) {
+      for (const [id, it] of items.entries()) {
+        if (
+          /^image\/(jpeg|png|webp|gif)$/i.test(it.mediaType) &&
+          (/cover/i.test(id) || /cover/i.test(it.href))
+        ) {
+          item = it;
+          break;
+        }
+      }
+    }
     if (!item) return null;
 
     const entry = zip.get(resolveZipPath(opfDir, item.href));

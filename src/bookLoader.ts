@@ -9,16 +9,33 @@
  * browser, so there is nothing to encrypt.
  */
 import type { Book } from "./books";
-import { loadBookBlob } from "./localBooks";
+import { loadBookBlob, loadCover, saveCover } from "./localBooks";
 import { loadDecryptedBook } from "./bookCrypto";
+import { readEpubMeta } from "./epubMeta";
 
 type LoadableBook = Book & { blobKey?: string };
+
+function maybeCacheEpubCover(book: LoadableBook, buf: ArrayBuffer): void {
+  if (book.type !== "epub" || book.cover) return;
+  void (async () => {
+    const existing = await loadCover(book.id).catch(() => null);
+    if (existing) return;
+    const meta = await readEpubMeta(
+      new File([buf], `${book.id}.epub`, { type: "application/epub+zip" })
+    ).catch(() => null);
+    if (meta?.cover) {
+      await saveCover(book.id, meta.cover).catch(() => {});
+    }
+  })();
+}
 
 export async function loadBook(book: LoadableBook): Promise<ArrayBuffer> {
   if (book.blobKey) {
     const blob = await loadBookBlob(book.blobKey);
     if (!blob) throw new Error("The stored file for this book is missing.");
-    return blob.arrayBuffer();
+    const buf = await blob.arrayBuffer();
+    maybeCacheEpubCover(book, buf);
+    return buf;
   }
   if (!book.url) {
     throw new Error("This book has no file to open.");
@@ -28,9 +45,31 @@ export async function loadBook(book: LoadableBook): Promise<ArrayBuffer> {
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} loading ${book.url}`);
     }
-    return res.arrayBuffer();
+    const buf = await res.arrayBuffer();
+    maybeCacheEpubCover(book, buf);
+    return buf;
   }
   // Catalog books ship as ciphertext; fetch+decrypt (may throw
   // PassphraseRequiredError / WrongPassphraseError for the reader to surface).
-  return loadDecryptedBook(book.url);
+  try {
+    const buf = await loadDecryptedBook(book.url);
+    maybeCacheEpubCover(book, buf);
+    return buf;
+  } catch (err) {
+    // In local dev before encrypt-books is run, fall back to plain file if present.
+    if (
+      err instanceof Error &&
+      err.message.includes("while fetching") &&
+      !/\.enc($|\?)/i.test(book.url)
+    ) {
+      const plainRes = await fetch(book.url);
+      const ct = plainRes.headers.get("content-type") ?? "";
+      if (plainRes.ok && !ct.includes("text/html")) {
+        const buf = await plainRes.arrayBuffer();
+        maybeCacheEpubCover(book, buf);
+        return buf;
+      }
+    }
+    throw err;
+  }
 }

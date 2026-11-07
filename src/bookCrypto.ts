@@ -74,9 +74,22 @@ function clearStoredPassphrase(): void {
  * cached one fails authentication (AES-GCM rejects tampered/wrong-key data).
  */
 export async function loadDecryptedBook(url: string): Promise<ArrayBuffer> {
-  const res = await fetch(`${url}.enc`);
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} while fetching ${url}.enc`);
+  const encPath = `${url}.enc`;
+  let res = await fetch(encPath);
+  let ct = res.headers.get("content-type") ?? "";
+  if (
+    (!res.ok || ct.includes("text/html")) &&
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1")
+  ) {
+    // In local dev, fall back to the published GitHub Pages vault ciphertext
+    // when a vault book isn't stored in local public/books/.
+    res = await fetch(`https://tanay-j.github.io/Leaf/${encodeURI(encPath)}`);
+    ct = res.headers.get("content-type") ?? "";
+  }
+  if (!res.ok || ct.includes("text/html")) {
+    throw new Error(`HTTP ${res.status} while fetching ${encPath}`);
   }
   const blob = new Uint8Array(await res.arrayBuffer());
 

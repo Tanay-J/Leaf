@@ -27,6 +27,7 @@ export const BOOKS: Book[] = [
     author: "Neerja Chowdhury",
     type: "epub",
     url: "books/how-prime-ministers-decide.epub",
+    cover: "books/covers/how-prime-ministers-decide.jpg",
   },
   {
     id: "attached",
@@ -34,18 +35,21 @@ export const BOOKS: Book[] = [
     author: "Amir Levine, Rachel Heller",
     type: "epub",
     url: "books/attached.epub",
+    cover: "books/covers/attached.jpg",
   },
   {
     id: "bionic",
     title: "Bionic",
     type: "epub",
     url: "books/bionic.epub",
+    cover: "books/covers/bionic.jpg",
   },
   {
     id: "black-warrant",
     title: "Black Warrant: Confessions of a Tihar Jailer",
     type: "epub",
     url: "books/black-warrant.epub",
+    cover: "books/covers/black-warrant.jpg",
   },
   {
     id: "daughters-of-the-brothel",
@@ -53,6 +57,7 @@ export const BOOKS: Book[] = [
     author: "Deepak Yadav",
     type: "epub",
     url: "books/daughters-of-the-brothel.epub",
+    cover: "books/covers/daughters-of-the-brothel.jpg",
   },
   {
     id: "delhi-a-novel",
@@ -60,6 +65,7 @@ export const BOOKS: Book[] = [
     author: "Khushwant Singh",
     type: "epub",
     url: "books/delhi-a-novel.epub",
+    cover: "books/covers/delhi-a-novel.jpg",
   },
   {
     id: "delhi-darshan",
@@ -67,12 +73,14 @@ export const BOOKS: Book[] = [
     author: "Giles Tillotson",
     type: "epub",
     url: "books/delhi-darshan.epub",
+    cover: "books/covers/delhi-darshan.jpg",
   },
   {
     id: "harry-potter-order-of-the-phoenix",
     title: "Harry Potter and the Order of the Phoenix",
     type: "epub",
     url: "books/harry-potter-order-of-the-phoenix.epub",
+    cover: "books/covers/harry-potter-order-of-the-phoenix.jpg",
   },
   {
     id: "how-to-win-friends-and-influence-people",
@@ -80,6 +88,7 @@ export const BOOKS: Book[] = [
     author: "Dale Carnegie",
     type: "epub",
     url: "books/how-to-win-friends-and-influence-people.epub",
+    cover: "books/covers/how-to-win-friends-and-influence-people.jpg",
   },
   {
     id: "how-to-win-friends-digital-age",
@@ -88,6 +97,7 @@ export const BOOKS: Book[] = [
     author: "Dale Carnegie and Associates",
     type: "epub",
     url: "books/how-to-win-friends-digital-age.epub",
+    cover: "books/covers/how-to-win-friends-digital-age.jpg",
   },
   {
     id: "latitudes-of-longing",
@@ -95,6 +105,7 @@ export const BOOKS: Book[] = [
     author: "Shubhangi Swarup",
     type: "epub",
     url: "books/latitudes-of-longing.epub",
+    cover: "books/covers/latitudes-of-longing.jpg",
   },
   {
     id: "lonely-planet-rajasthan-delhi-agra",
@@ -102,6 +113,7 @@ export const BOOKS: Book[] = [
     author: "Lonely Planet",
     type: "epub",
     url: "books/lonely-planet-rajasthan-delhi-agra.epub",
+    cover: "books/covers/lonely-planet-rajasthan-delhi-agra.jpg",
   },
   {
     id: "dopamine-detox",
@@ -109,6 +121,7 @@ export const BOOKS: Book[] = [
     author: "Thibaut Meurisse",
     type: "epub",
     url: "books/dopamine-detox.epub",
+    cover: "books/covers/dopamine-detox.jpg",
   },
   {
     id: "musafir-cafe",
@@ -116,6 +129,7 @@ export const BOOKS: Book[] = [
     author: "Divya Prakash Dubey",
     type: "epub",
     url: "books/musafir-cafe.epub",
+    cover: "books/covers/musafir-cafe.jpg",
   },
   {
     id: "shahjahanabad",
@@ -123,6 +137,7 @@ export const BOOKS: Book[] = [
     author: "Rana Safvi",
     type: "epub",
     url: "books/shahjahanabad.epub",
+    cover: "books/covers/shahjahanabad.jpg",
   },
   {
     id: "show-your-work",
@@ -130,6 +145,7 @@ export const BOOKS: Book[] = [
     author: "Austin Kleon",
     type: "epub",
     url: "books/show-your-work.epub",
+    cover: "books/covers/show-your-work.jpg",
   },
   {
     id: "steal-like-an-artist",
@@ -137,6 +153,7 @@ export const BOOKS: Book[] = [
     author: "Austin Kleon",
     type: "epub",
     url: "books/steal-like-an-artist.epub",
+    cover: "books/covers/steal-like-an-artist.png",
   },
   {
     id: "forgotten-cities-of-delhi",
@@ -144,6 +161,7 @@ export const BOOKS: Book[] = [
     author: "Rana Safvi",
     type: "epub",
     url: "books/forgotten-cities-of-delhi.epub",
+    cover: "books/covers/forgotten-cities-of-delhi.jpg",
   },
   {
     id: "dead-men-tell-tales",
@@ -151,24 +169,28 @@ export const BOOKS: Book[] = [
     author: "B. Umadathan",
     type: "epub",
     url: "books/dead-men-tell-tales.epub",
+    cover: "books/covers/dead-men-tell-tales.jpg",
   },
   {
     id: "kaalkut",
     title: "Kaalkut",
     type: "epub",
     url: "books/kaalkut.epub",
+    cover: "books/covers/kaalkut.jpg",
   },
   {
     id: "flames-and-arrows",
     title: "Flames and Arrows",
     type: "epub",
     url: "books/flames-and-arrows.epub",
+    cover: "books/covers/flames-and-arrows.jpg",
   },
   {
     id: "pinaka",
     title: "Pinaka",
     type: "epub",
     url: "books/pinaka.epub",
+    cover: "books/covers/pinaka.jpg",
   },
 ];
 
@@ -228,30 +250,37 @@ export async function reloadCatalog(): Promise<Book[]> {
 
 function parseCatalog(raw: unknown): Book[] {
   if (!Array.isArray(raw)) return BOOKS;
+  const staticById = new Map(BOOKS.map((b) => [b.id, b]));
   const seen = new Set<string>();
   const books: Book[] = [];
   for (const item of raw) {
     if (typeof item !== "object" || item === null) continue;
     const e = item as Record<string, unknown>;
     const id = typeof e.id === "string" ? e.id : "";
-    const title = typeof e.title === "string" ? e.title : "";
+    const fallback = staticById.get(id);
+    const title =
+      fallback?.title || (typeof e.title === "string" ? e.title : "");
     const type = e.type === "pdf" ? "pdf" : e.type === "epub" ? "epub" : null;
     const url = typeof e.url === "string" ? e.url : "";
     if (!id || !title || !type || !url || seen.has(id)) continue;
     // Only manifest-relative book paths, and nothing that escapes /books.
     if (!url.startsWith("books/") || url.includes("..")) continue;
     seen.add(id);
+    const rawAuthor =
+      typeof e.author === "string" && e.author ? e.author : fallback?.author;
+    const rawCover =
+      typeof e.cover === "string" &&
+      e.cover.startsWith("books/covers/") &&
+      !e.cover.includes("..")
+        ? e.cover
+        : fallback?.cover;
     books.push({
       id,
       title,
       type,
       url,
-      ...(typeof e.author === "string" && e.author ? { author: e.author } : {}),
-      ...(typeof e.cover === "string" &&
-      e.cover.startsWith("books/covers/") &&
-      !e.cover.includes("..")
-        ? { cover: e.cover }
-        : {}),
+      ...(rawAuthor ? { author: rawAuthor } : {}),
+      ...(rawCover ? { cover: rawCover } : {}),
     });
   }
   return books.length > 0 ? books : BOOKS;

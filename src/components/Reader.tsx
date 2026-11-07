@@ -79,7 +79,11 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
   }, [showHelp, zenMode, toggleSidebar]);
 
   return (
-    <div className={`reader-shell${zenMode ? " zen-mode" : ""}`}>
+    <div
+      className={`reader-shell studio-reader-shell${
+        sidebarOpen ? "" : " sidebar-collapsed"
+      }${zenMode ? " zen-mode" : ""}`}
+    >
       {zenMode && (
         <button
           type="button"
@@ -91,54 +95,6 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
           <Minimize2 size={14} />
         </button>
       )}
-      <header className="topbar reader-topbar">
-        <div className="topbar-actions">
-          <button className="secondary-action" onClick={() => navigate("#/")}>
-            <ArrowLeft size={15} />
-            Library
-          </button>
-          <button
-            className="icon-btn"
-            onClick={toggleSidebar}
-            title={sidebarOpen ? "Hide contents" : "Show contents"}
-          >
-            {sidebarOpen ? (
-              <PanelLeftClose size={16} />
-            ) : (
-              <PanelLeftOpen size={16} />
-            )}
-          </button>
-        </div>
-        <div className="reader-title">
-          <strong>{book.title}</strong>
-          {book.author && <span>{book.author}</span>}
-        </div>
-        <div className="topbar-actions">
-          {controls}
-          <button
-            className="icon-btn"
-            onClick={() => setZenMode(true)}
-            title="Focus mode (Z)"
-            aria-label="Focus mode"
-          >
-            <Maximize2 size={15} />
-          </button>
-          <button
-            className="icon-btn"
-            onClick={() => setShowHelp((h) => !h)}
-            title="Keyboard shortcuts"
-            aria-label="Keyboard shortcuts"
-          >
-            <Keyboard size={16} />
-          </button>
-          <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
-        </div>
-        {pct != null && (
-          <div className="reader-progress" aria-hidden>
-            <span style={{ width: `${Math.round(pct * 100)}%` }} />
-          </div>
-        )}
-      </header>
 
       {showHelp && (
         <div className="kbd-pop" role="dialog" aria-label="Keyboard shortcuts">
@@ -161,19 +117,98 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
         </div>
       )}
 
-      <div className="reader-body">
-        <aside className={`reader-sidebar ${sidebarOpen ? "" : "collapsed"}`}>
-          <div className="reader-sidebar-inner">
-            {sidebar ?? (
-              <>
-                <h2 className="reader-sidebar-title">Contents</h2>
-                <p className="reader-sidebar-empty">No contents to show.</p>
-              </>
-            )}
-          </div>
-        </aside>
+      {/* LEFT DOCKED RAIL */}
+      <aside
+        className={`reader-sidebar studio-reader-rail${
+          sidebarOpen ? "" : " collapsed"
+        }`}
+      >
+        <div className="studio-rail-top">
+          <button
+            type="button"
+            className="secondary-action studio-back-btn"
+            onClick={() => navigate("#/")}
+          >
+            <ArrowLeft size={15} />
+            Back to Shelf
+          </button>
+        </div>
+        <div className="reader-sidebar-inner">
+          {sidebar ?? (
+            <>
+              <h2 className="reader-sidebar-title">Contents</h2>
+              <p className="reader-sidebar-empty">No contents to show.</p>
+            </>
+          )}
+        </div>
+      </aside>
 
-        <main className="reader-stage">
+      {/* RIGHT MAIN PANE: Integrated Header + Sheet Canvas + Integrated Footer */}
+      <div className="studio-reader-main">
+        <header className="topbar reader-topbar studio-reader-header">
+          <div className="topbar-actions">
+            {!sidebarOpen && (
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={() => navigate("#/")}
+                title="Back to Shelf"
+              >
+                <ArrowLeft size={15} />
+                Shelf
+              </button>
+            )}
+            <button
+              type="button"
+              className={`secondary-action${sidebarOpen ? " active" : ""}`}
+              onClick={toggleSidebar}
+              title={
+                sidebarOpen ? "Hide sidebar (S)" : "Show contents & notes (S)"
+              }
+            >
+              {sidebarOpen ? (
+                <PanelLeftClose size={15} />
+              ) : (
+                <PanelLeftOpen size={15} />
+              )}
+              Sidebar
+            </button>
+          </div>
+
+          <div className="reader-title studio-header-title">
+            <strong>{book.title}</strong>
+            {book.author && <span>{book.author}</span>}
+          </div>
+
+          <div className="topbar-actions">
+            {controls}
+            <button
+              className="icon-btn"
+              onClick={() => setZenMode(true)}
+              title="Focus mode (Z)"
+              aria-label="Focus mode"
+            >
+              <Maximize2 size={15} />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={() => setShowHelp((h) => !h)}
+              title="Keyboard shortcuts"
+              aria-label="Keyboard shortcuts"
+            >
+              <Keyboard size={16} />
+            </button>
+            <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
+          </div>
+
+          {pct != null && (
+            <div className="reader-progress" aria-hidden>
+              <span style={{ width: `${Math.round(pct * 100)}%` }} />
+            </div>
+          )}
+        </header>
+
+        <main className="reader-stage studio-reader-stage">
           {book.type === "epub" ? (
             <EpubReader
               book={book}

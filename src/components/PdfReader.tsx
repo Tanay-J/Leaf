@@ -59,8 +59,10 @@ export default function PdfReader({
   onProgress,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvas2Ref = useRef<HTMLCanvasElement>(null);
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
   const taskRef = useRef<RenderTask | null>(null);
+  const task2Ref = useRef<RenderTask | null>(null);
   const seqRef = useRef(0);
   /** Per-page text cache, filled lazily by search. */
   const pageTextRef = useRef<Map<number, string>>(new Map());
@@ -68,6 +70,9 @@ export default function PdfReader({
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(() => loadProgress(book.id).page ?? 1);
   const [zoom, setZoom] = useState(() => loadProgress(book.id).zoom ?? 1);
+  const [spread, setSpread] = useState(
+    () => loadProgress(book.id).layout === "spread"
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -260,23 +265,26 @@ export default function PdfReader({
     [numPages]
   );
 
-  /* Render the current page, fit-to-width times zoom. */
+  /* Render the current page (and p+1 in 2-page spread mode), fit-to-width times zoom. */
   const renderPage = useCallback(async () => {
     const pdf = pdfRef.current;
     const canvas = canvasRef.current;
+    const canvas2 = canvas2Ref.current;
     if (!pdf || !canvas) return;
 
     const p = clampPage(page);
+    const hasSecond = spread && p + 1 <= pdf.numPages;
     const seq = ++seqRef.current;
     try {
       const pdfPage = await pdf.getPage(p);
       if (seq !== seqRef.current) return; // superseded while fetching
 
       const base = pdfPage.getViewport({ scale: 1 });
-      const available = Math.max(
-        (canvas.parentElement?.clientWidth ?? 900) - 32,
+      const totalAvail = Math.max(
+        (canvas.parentElement?.clientWidth ?? 900) - (hasSecond ? 48 : 32),
         120
       );
+      const available = hasSecond ? totalAvail / 2 : totalAvail;
       const scale = Math.max(available / base.width, 0.05) * zoom;
       const dpr = window.devicePixelRatio || 1;
       const viewport = pdfPage.getViewport({ scale: scale * dpr });
@@ -297,10 +305,36 @@ export default function PdfReader({
       } catch {
         /* cancelled by a newer render */
       }
+
+      if (hasSecond && canvas2) {
+        const pdfPage2 = await pdf.getPage(p + 1);
+        if (seq !== seqRef.current) return;
+        const base2 = pdfPage2.getViewport({ scale: 1 });
+        const scale2 = Math.max(available / base2.width, 0.05) * zoom;
+        const viewport2 = pdfPage2.getViewport({ scale: scale2 * dpr });
+        canvas2.width = Math.floor(viewport2.width);
+        canvas2.height = Math.floor(viewport2.height);
+        canvas2.style.width = `${Math.floor(base2.width * scale2)}px`;
+        canvas2.style.height = `${Math.floor(base2.height * scale2)}px`;
+        const ctx2 = canvas2.getContext("2d");
+        if (ctx2) {
+          task2Ref.current?.cancel();
+          const task2 = pdfPage2.render({
+            canvasContext: ctx2,
+            viewport: viewport2,
+          });
+          task2Ref.current = task2;
+          try {
+            await task2.promise;
+          } catch {
+            /* cancelled */
+          }
+        }
+      }
     } catch (err) {
       console.error(err);
     }
-  }, [page, zoom, clampPage]);
+  }, [page, zoom, spread, clampPage]);
 
   useEffect(() => {
     void renderPage();
@@ -320,6 +354,7 @@ export default function PdfReader({
       page: clampPage(page),
       total: numPages,
       zoom,
+      layout: spread ? "spread" : "single",
       ...(moved && page > 1
         ? { lastReadAt: Date.now(), updatedAt: Date.now() }
         : {}),
@@ -327,7 +362,7 @@ export default function PdfReader({
         ? { finishedAt: Date.now() }
         : {}),
     });
-  }, [page, zoom, numPages, book.id, clampPage]);
+  }, [page, zoom, spread, numPages, book.id, clampPage]);
 
   /* Reading-time tracking: 15 s ticks while the PDF is open and visible. */
   useEffect(() => {
@@ -433,6 +468,8 @@ export default function PdfReader({
     };
   }, [renderPage]);
 
+  const pageStep = spread ? 2 : 1;
+
   /* Keyboard navigation. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -449,23 +486,45 @@ export default function PdfReader({
       }
       if (e.key === "b") toggleBookmark();
       if (e.key === "ArrowLeft" || e.key === "k")
-        setPage((p) => clampPage(p - 1));
+        setPage((p) => clampPage(p - pageStep));
       if (e.key === "ArrowRight" || e.key === "j")
-        setPage((p) => clampPage(p + 1));
+        setPage((p) => clampPage(p + pageStep));
       if (e.key === " ") {
         e.preventDefault();
-        if (e.shiftKey) setPage((p) => clampPage(p - 1));
-        else setPage((p) => clampPage(p + 1));
+        if (e.shiftKey) setPage((p) => clampPage(p - pageStep));
+        else setPage((p) => clampPage(p + pageStep));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clampPage, searchOpen, toggleBookmark]);
+  }, [clampPage, pageStep, searchOpen, toggleBookmark]);
 
   /* Render format-specific controls into the topbar slot. */
   useEffect(() => {
     setControls(
       <>
+        <div
+          className="studio-seg-toggle"
+          role="group"
+          aria-label="Page layout"
+        >
+          <button
+            type="button"
+            className={!spread ? "active" : ""}
+            onClick={() => setSpread(false)}
+            title="Single-page view"
+          >
+            1-Page
+          </button>
+          <button
+            type="button"
+            className={spread ? "active" : ""}
+            onClick={() => setSpread(true)}
+            title="Two-page spread view"
+          >
+            2-Page
+          </button>
+        </div>
         <button
           className={`mini-btn${isBookmarked ? " active" : ""}`}
           onClick={toggleBookmark}
@@ -514,7 +573,7 @@ export default function PdfReader({
       </>
     );
     return () => setControls(null);
-  }, [zoom, searchOpen, invert, isBookmarked, toggleBookmark, setControls]);
+  }, [zoom, spread, searchOpen, invert, isBookmarked, toggleBookmark, setControls]);
 
   /* Render the outline + bookmarks into the collapsible sidebar. */
   useEffect(() => {
@@ -627,7 +686,7 @@ export default function PdfReader({
   ]);
 
   return (
-    <div className="format-reader">
+    <div className="format-reader bento-format-reader">
       <SearchPanel
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -661,54 +720,74 @@ export default function PdfReader({
           </p>
         </div>
       )}
-      <div className="reader-stage-area">
-        <button
-          type="button"
-          className="edge-tap edge-tap-left"
-          disabled={page <= 1}
-          onClick={() => setPage((p) => clampPage(p - 1))}
-          aria-label="Previous page"
-          tabIndex={-1}
-        />
-        <div className="pdf-scroll">
-          <canvas
-            ref={canvasRef}
-            className={`pdf-canvas${invert ? " inverted" : ""}`}
+      <div className="reader-stage-area studio-canvas">
+        <div className={`studio-sheet${spread ? " is-spread" : ""}`}>
+          <button
+            type="button"
+            className="edge-tap edge-tap-left"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => clampPage(p - pageStep))}
+            aria-label="Previous page"
+            tabIndex={-1}
+          />
+          <div className={`pdf-scroll${spread ? " pdf-spread" : ""}`}>
+            <canvas
+              ref={canvasRef}
+              className={`pdf-canvas${invert ? " inverted" : ""}`}
+            />
+            {spread && page + 1 <= numPages && (
+              <canvas
+                ref={canvas2Ref}
+                className={`pdf-canvas${invert ? " inverted" : ""}`}
+              />
+            )}
+          </div>
+          <button
+            type="button"
+            className="edge-tap edge-tap-right"
+            disabled={!!numPages && page >= numPages}
+            onClick={() => setPage((p) => clampPage(p + pageStep))}
+            aria-label="Next page"
+            tabIndex={-1}
           />
         </div>
-        <button
-          type="button"
-          className="edge-tap edge-tap-right"
-          disabled={!!numPages && page >= numPages}
-          onClick={() => setPage((p) => clampPage(p + 1))}
-          aria-label="Next page"
-          tabIndex={-1}
-        />
       </div>
-      <footer className="reader-navbar">
+      <footer className="reader-navbar studio-reader-footer">
         <button
           className="nav-btn"
           disabled={page <= 1}
-          onClick={() => setPage((p) => clampPage(p - 1))}
+          onClick={() => setPage((p) => clampPage(p - pageStep))}
         >
           <ChevronLeft size={15} />
-          Prev
+          Previous
         </button>
-        <span className="nav-pos page-jump">
-          <input
-            type="number"
-            min={1}
-            max={numPages || undefined}
-            value={page}
-            onChange={(e) => setPage(clampPage(Number(e.target.value)))}
-          />
-          {" / "}
-          {numPages || "…"}
-        </span>
+        <div className="studio-footer-center">
+          {numPages > 0 && (
+            <div className="studio-footer-track">
+              <span
+                style={{
+                  width: `${Math.round((clampPage(page) / numPages) * 100)}%`,
+                }}
+              />
+            </div>
+          )}
+          <span className="nav-pos page-jump">
+            <input
+              type="number"
+              min={1}
+              max={numPages || undefined}
+              value={page}
+              onChange={(e) => setPage(clampPage(Number(e.target.value)))}
+            />
+            {spread && page + 1 <= numPages ? `–${page + 1}` : ""}
+            {" / "}
+            {numPages || "…"}
+          </span>
+        </div>
         <button
           className="nav-btn"
           disabled={!!numPages && page >= numPages}
-          onClick={() => setPage((p) => clampPage(p + 1))}
+          onClick={() => setPage((p) => clampPage(p + pageStep))}
         >
           Next
           <ChevronRight size={15} />

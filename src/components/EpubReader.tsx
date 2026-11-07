@@ -147,7 +147,8 @@ export default function EpubReader({
         rendition = eb.renderTo(el, {
           width: "100%",
           height: "100%",
-          spread: layout === "spread" ? "auto" : "none",
+          spread: layout === "spread" ? "always" : "none",
+          minSpreadWidth: 480,
           flow: layout === "scroll" ? "scrolled-doc" : "paginated",
         });
         renditionRef.current = rendition;
@@ -350,6 +351,29 @@ export default function EpubReader({
       t.removeOverride("background-color");
     }
   }, [fontSize, fontFamily, spacingId, theme, status]);
+
+  /* Reflow epubjs rendition when the Bento stage or sidebar resizes. */
+  useEffect(() => {
+    const el = viewerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let timer = 0;
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const rend = renditionRef.current as unknown as {
+          resize?: (w: number, h: number) => void;
+        } | null;
+        rend?.resize?.(Math.floor(rect.width), Math.floor(rect.height));
+      }, 120);
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(timer);
+    };
+  }, [status]);
 
   useEffect(() => {
     saveProgress(book.id, {
@@ -621,6 +645,28 @@ export default function EpubReader({
   useEffect(() => {
     setControls(
       <>
+        <div
+          className="studio-seg-toggle"
+          role="group"
+          aria-label="Page layout"
+        >
+          <button
+            type="button"
+            className={layout !== "spread" ? "active" : ""}
+            onClick={() => setLayout("single")}
+            title="Single-page view"
+          >
+            1-Page
+          </button>
+          <button
+            type="button"
+            className={layout === "spread" ? "active" : ""}
+            onClick={() => setLayout("spread")}
+            title="Two-page spread view"
+          >
+            2-Page
+          </button>
+        </div>
         <button
           className={`mini-btn${isBookmarked ? " active" : ""}`}
           onClick={toggleBookmark}
@@ -805,8 +851,10 @@ export default function EpubReader({
     setSidebar,
   ]);
 
+  const currentPct = loadProgress(book.id).pct ?? null;
+
   return (
-    <div className="format-reader">
+    <div className="format-reader bento-format-reader">
       <SearchPanel
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
@@ -872,36 +920,53 @@ export default function EpubReader({
           </p>
         </div>
       )}
-      <div className="reader-stage-area">
-        {layout !== "scroll" && (
-          <button
-            type="button"
-            className="edge-tap edge-tap-left"
-            onClick={goPrev}
-            aria-label="Previous page"
-            tabIndex={-1}
-          />
-        )}
+      <div className="reader-stage-area studio-canvas">
         <div
-          ref={viewerRef}
-          className={`epub-viewer${layout === "spread" ? " epub-spread" : ""}`}
-        />
-        {layout !== "scroll" && (
-          <button
-            type="button"
-            className="edge-tap edge-tap-right"
-            onClick={goNext}
-            aria-label="Next page"
-            tabIndex={-1}
+          className={`studio-sheet${layout === "spread" ? " is-spread" : ""}`}
+        >
+          {layout === "spread" && (
+            <div className="bento-spread-spine" aria-hidden="true" />
+          )}
+          {layout !== "scroll" && (
+            <button
+              type="button"
+              className="edge-tap edge-tap-left"
+              onClick={goPrev}
+              aria-label="Previous page"
+              tabIndex={-1}
+            />
+          )}
+          <div
+            ref={viewerRef}
+            className={`epub-viewer${layout === "spread" ? " epub-spread" : ""}`}
           />
-        )}
+          {layout !== "scroll" && (
+            <button
+              type="button"
+              className="edge-tap edge-tap-right"
+              onClick={goNext}
+              aria-label="Next page"
+              tabIndex={-1}
+            />
+          )}
+        </div>
       </div>
-      <footer className="reader-navbar">
+      <footer className="reader-navbar studio-reader-footer">
         <button className="nav-btn" onClick={goPrev}>
           <ChevronLeft size={15} />
-          Prev
+          Previous
         </button>
-        <span className="nav-pos">{chapter}</span>
+        <div className="studio-footer-center">
+          {currentPct != null && (
+            <div className="studio-footer-track">
+              <span style={{ width: `${Math.round(currentPct * 100)}%` }} />
+            </div>
+          )}
+          <span className="nav-pos">
+            {currentPct != null ? `${Math.round(currentPct * 100)}% · ` : ""}
+            {chapter || book.title}
+          </span>
+        </div>
         <button className="nav-btn" onClick={goNext}>
           Next
           <ChevronRight size={15} />

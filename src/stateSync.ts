@@ -232,6 +232,19 @@ function maxMergeNumbers(
   return out;
 }
 
+function mergeById<T extends { id: string; createdAt: number }>(
+  a?: T[],
+  b?: T[]
+): T[] | undefined {
+  if (!a?.length && !b?.length) return undefined;
+  const map = new Map<string, T>();
+  for (const item of a ?? []) map.set(item.id, item);
+  for (const item of b ?? []) {
+    if (!map.has(item.id)) map.set(item.id, item);
+  }
+  return [...map.values()].sort((x, y) => x.createdAt - y.createdAt);
+}
+
 function mergeProgress(
   local: Record<string, ProgressRecord>,
   remote: Record<string, ProgressRecord>
@@ -244,8 +257,12 @@ function mergeProgress(
       continue;
     }
     const winner = (r.updatedAt ?? 0) > (l.updatedAt ?? 0) ? r : l;
+    const bookmarks = mergeById(winner.bookmarks, (winner === r ? l : r).bookmarks);
+    const highlights = mergeById(winner.highlights, (winner === r ? l : r).highlights);
     out[id] = {
       ...winner,
+      ...(bookmarks ? { bookmarks } : {}),
+      ...(highlights ? { highlights } : {}),
       // Never regress these:
       finishedAt:
         l.finishedAt && r.finishedAt

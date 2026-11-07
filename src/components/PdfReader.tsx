@@ -5,12 +5,28 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronLeft, ChevronRight, Contrast, Loader2, Minus, Plus, Search } from "lucide-react";
+import {
+  Bookmark,
+  ChevronLeft,
+  ChevronRight,
+  Contrast,
+  Copy,
+  Loader2,
+  Minus,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { Book } from "../books";
-import { addReadingSeconds, loadProgress, saveProgress } from "../lib";
+import {
+  addReadingSeconds,
+  loadProgress,
+  saveProgress,
+  type BookmarkItem,
+} from "../lib";
 import { loadBook } from "../bookLoader";
 import SearchPanel, { type SearchHit } from "./SearchPanel";
 import {
@@ -60,6 +76,66 @@ export default function PdfReader({
   const [invert, setInvert] = useState(
     () => loadProgress(book.id).invert ?? false
   );
+  const [sidebarTab, setSidebarTab] = useState<"toc" | "notes">("toc");
+  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(
+    () => loadProgress(book.id).bookmarks ?? []
+  );
+  const [copiedNote, setCopiedNote] = useState(false);
+
+  const isBookmarked = bookmarks.some((b) => b.page === page);
+
+  const toggleBookmark = useCallback(() => {
+    setBookmarks((prev) => {
+      const exists = prev.some((b) => b.page === page);
+      const next = exists
+        ? prev.filter((b) => b.page !== page)
+        : [
+            ...prev,
+            {
+              id: `bm-p${page}-${Date.now()}`,
+              page,
+              label: `Page ${page}`,
+              createdAt: Date.now(),
+            },
+          ];
+      const p = loadProgress(book.id);
+      saveProgress(book.id, {
+        ...p,
+        bookmarks: next,
+        updatedAt: Date.now(),
+      });
+      return next;
+    });
+  }, [page, book.id]);
+
+  const removeBookmark = useCallback(
+    (id: string) => {
+      setBookmarks((prev) => {
+        const next = prev.filter((b) => b.id !== id);
+        const p = loadProgress(book.id);
+        saveProgress(book.id, {
+          ...p,
+          bookmarks: next,
+          updatedAt: Date.now(),
+        });
+        return next;
+      });
+    },
+    [book.id]
+  );
+
+  const copyAllNotes = useCallback(() => {
+    const lines: string[] = [
+      `# ${book.title}${book.author ? ` — ${book.author}` : ""}`,
+      "",
+      "## Bookmarks",
+      ...bookmarks.map((b) => `- ${b.label}`),
+    ];
+    void navigator.clipboard?.writeText(lines.join("\n")).then(() => {
+      setCopiedNote(true);
+      window.setTimeout(() => setCopiedNote(false), 1800);
+    });
+  }, [book.title, book.author, bookmarks]);
 
   const toggleInvert = () =>
     setInvert((v) => {
@@ -371,6 +447,7 @@ export default function PdfReader({
         setSearchOpen(false);
         return;
       }
+      if (e.key === "b") toggleBookmark();
       if (e.key === "ArrowLeft" || e.key === "k")
         setPage((p) => clampPage(p - 1));
       if (e.key === "ArrowRight" || e.key === "j")
@@ -383,12 +460,21 @@ export default function PdfReader({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clampPage, searchOpen]);
+  }, [clampPage, searchOpen, toggleBookmark]);
 
   /* Render format-specific controls into the topbar slot. */
   useEffect(() => {
     setControls(
       <>
+        <button
+          className={`mini-btn${isBookmarked ? " active" : ""}`}
+          onClick={toggleBookmark}
+          title={isBookmarked ? "Remove bookmark (B)" : "Bookmark page (B)"}
+          aria-label={isBookmarked ? "Remove bookmark" : "Bookmark page"}
+          aria-pressed={isBookmarked}
+        >
+          <Bookmark size={14} />
+        </button>
         <button
           className={`mini-btn${searchOpen ? " active" : ""}`}
           onClick={() => setSearchOpen((o) => !o)}
@@ -428,36 +514,117 @@ export default function PdfReader({
       </>
     );
     return () => setControls(null);
-  }, [zoom, searchOpen, invert, setControls]);
+  }, [zoom, searchOpen, invert, isBookmarked, toggleBookmark, setControls]);
 
-  /* Render the outline (bookmarks) into the collapsible sidebar. */
+  /* Render the outline + bookmarks into the collapsible sidebar. */
   useEffect(() => {
-    if (outline.length === 0) {
-      setSidebar(null);
-      return () => setSidebar(null);
-    }
     setSidebar(
-      <ul className="toc-list">
-        {outline.map((it, i) => (
-          <li key={`${it.title}-${i}`}>
+      <>
+        <div className="sidebar-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarTab === "toc"}
+            className={`sidebar-tab${sidebarTab === "toc" ? " active" : ""}`}
+            onClick={() => setSidebarTab("toc")}
+          >
+            Contents
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarTab === "notes"}
+            className={`sidebar-tab${sidebarTab === "notes" ? " active" : ""}`}
+            onClick={() => setSidebarTab("notes")}
+          >
+            Saved
+            {bookmarks.length > 0 && (
+              <span className="sidebar-badge">{bookmarks.length}</span>
+            )}
+          </button>
+        </div>
+
+        {sidebarTab === "toc" ? (
+          outline.length === 0 ? (
+            <p className="reader-sidebar-empty">No contents to show.</p>
+          ) : (
+            <ul className="toc-list">
+              {outline.map((it, i) => (
+                <li key={`${it.title}-${i}`}>
+                  <button
+                    className={`toc-item${
+                      it.page != null && it.page === page ? " active" : ""
+                    }`}
+                    style={{ paddingLeft: 12 + it.depth * 14 }}
+                    disabled={it.page == null}
+                    onClick={() => {
+                      if (it.page != null) setPage(clampPage(it.page));
+                    }}
+                  >
+                    {it.title || "Untitled"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : bookmarks.length === 0 ? (
+          <p className="reader-sidebar-empty">
+            No bookmarks yet. Press <strong>B</strong> or click the bookmark
+            icon to save a page.
+          </p>
+        ) : (
+          <div className="sidebar-notes">
             <button
-              className={`toc-item${
-                it.page != null && it.page === page ? " active" : ""
-              }`}
-              style={{ paddingLeft: 12 + it.depth * 14 }}
-              disabled={it.page == null}
-              onClick={() => {
-                if (it.page != null) setPage(clampPage(it.page));
-              }}
+              type="button"
+              className="secondary-action sidebar-copy-btn"
+              onClick={copyAllNotes}
             >
-              {it.title || "Untitled"}
+              <Copy size={13} />
+              {copiedNote ? "Copied Markdown!" : "Copy as Markdown"}
             </button>
-          </li>
-        ))}
-      </ul>
+            <div className="sidebar-section">
+              <span className="reader-sidebar-title">Bookmarks</span>
+              <ul className="toc-list">
+                {bookmarks.map((bm) => (
+                  <li key={bm.id} className="sidebar-note-row">
+                    <button
+                      type="button"
+                      className={`toc-item${bm.page === page ? " active" : ""}`}
+                      onClick={() => {
+                        if (bm.page != null) setPage(clampPage(bm.page));
+                      }}
+                    >
+                      {bm.label}
+                    </button>
+                    <button
+                      type="button"
+                      className="note-del-btn"
+                      onClick={() => removeBookmark(bm.id)}
+                      title="Remove bookmark"
+                      aria-label="Remove bookmark"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </>
     );
     return () => setSidebar(null);
-  }, [outline, page, clampPage, setSidebar]);
+  }, [
+    outline,
+    page,
+    clampPage,
+    sidebarTab,
+    bookmarks,
+    copiedNote,
+    copyAllNotes,
+    removeBookmark,
+    setSidebar,
+  ]);
 
   return (
     <div className="format-reader">

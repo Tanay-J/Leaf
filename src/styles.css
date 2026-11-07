@@ -2798,3 +2798,260 @@ html.dark-theme .continue-cover {
   align-items: center;
   gap: 8px;
 }
+
+/* ---------- Bookmarks & Highlights ---------- */
+
+.sidebar-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--bg-app);
+  margin: 0 4px 6px;
+}
+
+.sidebar-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.sidebar-tab:hover {
+  color: var(--primary-color);
+}
+
+.sidebar-tab.active {
+  background: var(--bg-card);
+  color: var(--primary-color);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.sidebar-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--primary-bg);
+  color: var(--primary-color);
+  font-size: 10px;
+  font-weight: 800;
+  display: inline-grid;
+  place-items: center;
+}
+
+.sidebar-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sidebar-copy-btn {
+  align-self: stretch;
+  justify-content: center;
+  margin: 0 4px;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-note-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.sidebar-note-row .toc-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.highlight-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.highlight-quote {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-main);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.highlight-chapter {
+  font-size: 11px;
+  color: var(--text-subtle);
+}
+
+.note-del-btn {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  margin-top: 4px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-subtle);
+  opacity: 0.65;
+  transition: all 0.15s ease;
+}
+
+.note-del-btn:hover {
+  opacity: 1;
+  color: #dc2626;
+  background: var(--tag-bg);
+}
+
+/* Floating text selection bar in EPUB reader */
+.selection-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 35;
+  width: min(520px, calc(100% - 24px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.selection-preview {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+
+.selection-btn {
+  padding: 6px 11px;
+  font-size: 12.5px;
+  flex-shrink: 0;
+}
+
+/* BookDetail bookmarks & highlights section */
+.detail-notes {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.detail-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.detail-notes-head h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.detail-notes-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-notes-group h4 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.detail-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-note-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+
+.detail-note-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: var(--text-main);
+}
+
+.detail-note-jump strong {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.detail-note-jump:hover strong,
+.detail-note-jump:hover .detail-quote {
+  color: var(--primary-color);
+}
+
+.detail-note-jump span {
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+.detail-quote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2.5px solid var(--primary-color);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-main);
+}

@@ -23,8 +23,9 @@ interface Props {
 const SHORTCUTS: [string, string][] = [
   ["← / →, J / K", "Previous / next page"],
   ["Space / Shift+Space", "Next / previous page"],
+  ["B", "Bookmark current page"],
   ["S", "Toggle the contents sidebar"],
-  ["Z", " Distraction-free focus mode"],
+  ["Z", "Distraction-free focus mode"],
   ["F", "Fullscreen"],
   ["Esc", "Close panels or exit focus mode"],
   ["?", "This shortcut list"],
@@ -163,9 +164,11 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
       <div className="reader-body">
         <aside className={`reader-sidebar ${sidebarOpen ? "" : "collapsed"}`}>
           <div className="reader-sidebar-inner">
-            <h2 className="reader-sidebar-title">Contents</h2>
             {sidebar ?? (
-              <p className="reader-sidebar-empty">No contents to show.</p>
+              <>
+                <h2 className="reader-sidebar-title">Contents</h2>
+                <p className="reader-sidebar-empty">No contents to show.</p>
+              </>
             )}
           </div>
         </aside>

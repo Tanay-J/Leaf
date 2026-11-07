@@ -1,16 +1,24 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
+  Bookmark,
   BookOpen,
   Check,
+  Copy,
   FileText,
+  Highlighter,
   Pencil,
   Plus,
   Trash2,
   X,
 } from "lucide-react";
 import type { Book } from "../books";
-import { navigate, loadProgress, type Theme } from "../lib";
+import {
+  navigate,
+  loadProgress,
+  saveProgress,
+  type Theme,
+} from "../lib";
 import { bookSecondsMap, READING_TIME_EVENT } from "../lib";
 import { loadCover } from "../localBooks";
 import {
@@ -55,6 +63,8 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(book.title);
   const [editAuthor, setEditAuthor] = useState(book.author ?? "");
+  const [copied, setCopied] = useState(false);
+  const [, setNotesTick] = useState(0);
 
   useEffect(() => {
     setEditTitle(book.title);
@@ -91,11 +101,75 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
   }, [book.id]);
 
   const p = loadProgress(book.id);
+  const bookmarks = p.bookmarks ?? [];
+  const highlights = p.highlights ?? [];
   const pct =
     book.type === "pdf" && p.page && p.total
       ? p.page / p.total
       : (p.pct ?? null);
   const seconds = bookSecondsMap()[book.id] ?? 0;
+
+  const copyMarkdown = () => {
+    const lines: string[] = [
+      `# ${book.title}${book.author ? ` — ${book.author}` : ""}`,
+    ];
+    if (bookmarks.length > 0) {
+      lines.push("", "## Bookmarks");
+      for (const b of bookmarks) lines.push(`- ${b.label}`);
+    }
+    if (highlights.length > 0) {
+      lines.push("", "## Highlights");
+      for (const h of highlights) {
+        lines.push(
+          `> ${h.text}${h.chapter ? `\n> — *${h.chapter}*` : ""}`,
+          ""
+        );
+      }
+    }
+    void navigator.clipboard?.writeText(lines.join("\n")).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    });
+  };
+
+  const jumpToBookmark = (bm: (typeof bookmarks)[number]) => {
+    const cur = loadProgress(book.id);
+    saveProgress(book.id, {
+      ...cur,
+      ...(bm.cfi ? { cfi: bm.cfi } : {}),
+      ...(bm.page ? { page: bm.page } : {}),
+    });
+    navigate(`#/book/${encodeURIComponent(book.id)}`);
+  };
+
+  const jumpToHighlight = (hl: (typeof highlights)[number]) => {
+    const cur = loadProgress(book.id);
+    saveProgress(book.id, {
+      ...cur,
+      cfi: hl.cfiRange,
+    });
+    navigate(`#/book/${encodeURIComponent(book.id)}`);
+  };
+
+  const deleteBookmark = (id: string) => {
+    const cur = loadProgress(book.id);
+    saveProgress(book.id, {
+      ...cur,
+      bookmarks: (cur.bookmarks ?? []).filter((b) => b.id !== id),
+      updatedAt: Date.now(),
+    });
+    setNotesTick((t) => t + 1);
+  };
+
+  const deleteHighlight = (id: string) => {
+    const cur = loadProgress(book.id);
+    saveProgress(book.id, {
+      ...cur,
+      highlights: (cur.highlights ?? []).filter((h) => h.id !== id),
+      updatedAt: Date.now(),
+    });
+    setNotesTick((t) => t + 1);
+  };
 
   const status = p.finishedAt
     ? `Finished ${fmtDate(p.finishedAt)}`
@@ -250,6 +324,91 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
             </div>
           </div>
         </div>
+
+        {(bookmarks.length > 0 || highlights.length > 0) && (
+          <section className="detail-notes">
+            <div className="detail-notes-head">
+              <h3>Bookmarks & Highlights</h3>
+              <button
+                type="button"
+                className="secondary-action"
+                onClick={copyMarkdown}
+              >
+                <Copy size={14} />
+                {copied ? "Copied Markdown!" : "Copy as Markdown"}
+              </button>
+            </div>
+
+            {bookmarks.length > 0 && (
+              <div className="detail-notes-group">
+                <h4>
+                  <Bookmark size={14} />
+                  Bookmarks ({bookmarks.length})
+                </h4>
+                <ul className="detail-notes-list">
+                  {bookmarks.map((bm) => (
+                    <li key={bm.id} className="detail-note-item">
+                      <button
+                        type="button"
+                        className="detail-note-jump"
+                        onClick={() => jumpToBookmark(bm)}
+                      >
+                        <strong>{bm.label}</strong>
+                        <span>{fmtDate(bm.createdAt)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="note-del-btn"
+                        onClick={() => deleteBookmark(bm.id)}
+                        title="Remove bookmark"
+                        aria-label="Remove bookmark"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {highlights.length > 0 && (
+              <div className="detail-notes-group">
+                <h4>
+                  <Highlighter size={14} />
+                  Highlights ({highlights.length})
+                </h4>
+                <ul className="detail-notes-list">
+                  {highlights.map((hl) => (
+                    <li key={hl.id} className="detail-note-item">
+                      <button
+                        type="button"
+                        className="detail-note-jump"
+                        onClick={() => jumpToHighlight(hl)}
+                      >
+                        <blockquote className="detail-quote">
+                          “{hl.text}”
+                        </blockquote>
+                        <span>
+                          {hl.chapter ? `${hl.chapter} · ` : ""}
+                          {fmtDate(hl.createdAt)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="note-del-btn"
+                        onClick={() => deleteHighlight(hl.id)}
+                        title="Remove highlight"
+                        aria-label="Remove highlight"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+        )}
       </main>
     </div>
   );

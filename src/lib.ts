@@ -113,6 +113,30 @@ export function useLibraryView() {
 
 export type EpubLayout = "single" | "spread" | "scroll";
 
+export interface BookmarkItem {
+  id: string;
+  /** EPUB CFI for jumping back to the bookmarked spot. */
+  cfi?: string;
+  /** PDF 1-based page number. */
+  page?: number;
+  /** Display label (e.g. chapter title or "Page 12"). */
+  label: string;
+  /** Optional short text snippet from the page. */
+  excerpt?: string;
+  createdAt: number;
+}
+
+export interface HighlightItem {
+  id: string;
+  /** EPUB CFI range for the selected text. */
+  cfiRange: string;
+  /** Highlighted quote text. */
+  text: string;
+  /** Chapter label where the highlight was made. */
+  chapter?: string;
+  createdAt: number;
+}
+
 export interface BookProgress {
   cfi?: string;
   chapter?: string;
@@ -129,6 +153,10 @@ export interface BookProgress {
   zoom?: number;
   /** PDF-only: invert page colors for dark/sepia reading. */
   invert?: boolean;
+  /** Saved bookmarks for this book. */
+  bookmarks?: BookmarkItem[];
+  /** Saved text highlights / quotes for this book (EPUB). */
+  highlights?: HighlightItem[];
   /** Last time the position itself moved (not a font tweak) — sync LWW. */
   lastReadAt?: number | null;
   /** First time the book was read to the end. */

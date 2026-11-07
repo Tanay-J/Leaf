@@ -5,7 +5,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Search } from "lucide-react";
+import {
+  Bookmark,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Highlighter,
+  Loader2,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import ePub from "epubjs";
 import type { Book as EpubBook, Rendition } from "epubjs";
 import type { Book } from "../books";
@@ -13,7 +23,9 @@ import {
   addReadingSeconds,
   loadProgress,
   saveProgress,
+  type BookmarkItem,
   type EpubLayout,
+  type HighlightItem,
   type Theme,
 } from "../lib";
 import { loadBook } from "../bookLoader";
@@ -71,6 +83,23 @@ export default function EpubReader({
   const [toc, setToc] = useState<TocEntry[]>([]);
   const [activeToc, setActiveToc] = useState(-1);
   const [chapter, setChapter] = useState("");
+  const [currentCfi, setCurrentCfi] = useState(
+    () => loadProgress(book.id).cfi ?? ""
+  );
+  const [sidebarTab, setSidebarTab] = useState<"toc" | "notes">("toc");
+  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(
+    () => loadProgress(book.id).bookmarks ?? []
+  );
+  const [highlights, setHighlights] = useState<HighlightItem[]>(
+    () => loadProgress(book.id).highlights ?? []
+  );
+  const [pendingSel, setPendingSel] = useState<{
+    cfiRange: string;
+    text: string;
+  } | null>(null);
+  const [copiedNote, setCopiedNote] = useState(false);
+  const chapterRef = useRef("");
+  chapterRef.current = chapter;
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -205,7 +234,9 @@ export default function EpubReader({
           const idx = entries.findIndex((it) => it.href.split("#")[0] === href);
           const label = idx >= 0 ? entries[idx].label : "";
           setChapter(label);
+          setCurrentCfi(cfi);
           setActiveToc(idx);
+          setPendingSel(null);
           const prev = loadProgress(book.id);
           const pct = location?.end?.percentage ?? 0;
           onProgress?.(Math.min(1, Math.max(0, pct)));
@@ -223,7 +254,30 @@ export default function EpubReader({
           });
         });
 
+        // Listen for text selection inside the EPUB iframe to offer highlighting.
+        rendition.on(
+          "selected",
+          (cfiRange: string, contents: { window?: Window }) => {
+            const text = (contents?.window?.getSelection()?.toString() ?? "")
+              .replace(/\s+/g, " ")
+              .trim();
+            if (text.length >= 2) {
+              setPendingSel({ cfiRange, text });
+            }
+          }
+        );
+
         await rendition.display(saved.cfi || undefined);
+        // Apply any saved highlights onto the rendition annotations layer.
+        for (const h of loadProgress(book.id).highlights ?? []) {
+          try {
+            rendition.annotations.highlight(h.cfiRange, {}, () => {
+              void renditionRef.current?.display(h.cfiRange);
+            });
+          } catch {
+            /* ignore invalid range */
+          }
+        }
         if (!disposed) setStatus("ready");
       } catch (err) {
         if (disposed) return;
@@ -312,6 +366,128 @@ export default function EpubReader({
 
   const goPrev = useCallback(() => renditionRef.current?.prev(), []);
   const goNext = useCallback(() => renditionRef.current?.next(), []);
+
+  const isBookmarked = Boolean(
+    currentCfi && bookmarks.some((b) => b.cfi === currentCfi)
+  );
+
+  const toggleBookmark = useCallback(() => {
+    if (!currentCfi) return;
+    setBookmarks((prev) => {
+      const exists = prev.some((b) => b.cfi === currentCfi);
+      const next = exists
+        ? prev.filter((b) => b.cfi !== currentCfi)
+        : [
+            ...prev,
+            {
+              id: `bm-${Date.now()}`,
+              cfi: currentCfi,
+              label:
+                chapterRef.current ||
+                `${Math.round((loadProgress(book.id).pct ?? 0) * 100)}% into book`,
+              createdAt: Date.now(),
+            },
+          ];
+      const p = loadProgress(book.id);
+      saveProgress(book.id, {
+        ...p,
+        bookmarks: next,
+        updatedAt: Date.now(),
+      });
+      return next;
+    });
+  }, [currentCfi, book.id]);
+
+  const removeBookmark = useCallback(
+    (id: string) => {
+      setBookmarks((prev) => {
+        const next = prev.filter((b) => b.id !== id);
+        const p = loadProgress(book.id);
+        saveProgress(book.id, {
+          ...p,
+          bookmarks: next,
+          updatedAt: Date.now(),
+        });
+        return next;
+      });
+    },
+    [book.id]
+  );
+
+  const addHighlight = () => {
+    if (!pendingSel) return;
+    const { cfiRange, text } = pendingSel;
+    setPendingSel(null);
+    try {
+      renditionRef.current?.annotations.highlight(cfiRange, {}, () => {
+        void renditionRef.current?.display(cfiRange);
+      });
+    } catch {
+      /* ignore */
+    }
+    setHighlights((prev) => {
+      if (prev.some((h) => h.cfiRange === cfiRange)) return prev;
+      const item: HighlightItem = {
+        id: `hl-${Date.now()}`,
+        cfiRange,
+        text,
+        ...(chapter ? { chapter } : {}),
+        createdAt: Date.now(),
+      };
+      const next = [...prev, item];
+      const p = loadProgress(book.id);
+      saveProgress(book.id, {
+        ...p,
+        highlights: next,
+        updatedAt: Date.now(),
+      });
+      return next;
+    });
+  };
+
+  const removeHighlight = useCallback(
+    (item: HighlightItem) => {
+      try {
+        renditionRef.current?.annotations.remove(item.cfiRange, "highlight");
+      } catch {
+        /* ignore */
+      }
+      setHighlights((prev) => {
+        const next = prev.filter((h) => h.id !== item.id);
+        const p = loadProgress(book.id);
+        saveProgress(book.id, {
+          ...p,
+          highlights: next,
+          updatedAt: Date.now(),
+        });
+        return next;
+      });
+    },
+    [book.id]
+  );
+
+  const copyAllNotes = useCallback(() => {
+    const lines: string[] = [`# ${book.title}${book.author ? ` — ${book.author}` : ""}`];
+    if (bookmarks.length > 0) {
+      lines.push("", "## Bookmarks");
+      for (const b of bookmarks) {
+        lines.push(`- ${b.label}`);
+      }
+    }
+    if (highlights.length > 0) {
+      lines.push("", "## Highlights");
+      for (const h of highlights) {
+        lines.push(
+          `> ${h.text}${h.chapter ? `\n> — *${h.chapter}*` : ""}`,
+          ""
+        );
+      }
+    }
+    void navigator.clipboard?.writeText(lines.join("\n")).then(() => {
+      setCopiedNote(true);
+      window.setTimeout(() => setCopiedNote(false), 1800);
+    });
+  }, [book.title, book.author, bookmarks, highlights]);
 
   /* Reading-time tracking: 15 s ticks while the book is open in a visible
      tab. Time rides along on the next progress push (no extra sync events). */
@@ -408,7 +584,7 @@ export default function EpubReader({
     setSearchOpen(false);
   };
 
-  /* Keyboard navigation: arrows, J/K, Space, and Esc for the search panel. */
+  /* Keyboard navigation: arrows, J/K, Space, B, and Esc for the search panel. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -418,10 +594,17 @@ export default function EpubReader({
       ) {
         return;
       }
-      if (e.key === "Escape" && searchOpen) {
-        setSearchOpen(false);
-        return;
+      if (e.key === "Escape") {
+        if (searchOpen) {
+          setSearchOpen(false);
+          return;
+        }
+        if (pendingSel) {
+          setPendingSel(null);
+          return;
+        }
       }
+      if (e.key === "b") toggleBookmark();
       if (e.key === "ArrowLeft" || e.key === "k") goPrev();
       if (e.key === "ArrowRight" || e.key === "j") goNext();
       if (e.key === " ") {
@@ -432,12 +615,21 @@ export default function EpubReader({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goPrev, goNext, searchOpen]);
+  }, [goPrev, goNext, searchOpen, pendingSel, toggleBookmark]);
 
   /* Render format-specific controls into the topbar slot. */
   useEffect(() => {
     setControls(
       <>
+        <button
+          className={`mini-btn${isBookmarked ? " active" : ""}`}
+          onClick={toggleBookmark}
+          title={isBookmarked ? "Remove bookmark (B)" : "Bookmark page (B)"}
+          aria-label={isBookmarked ? "Remove bookmark" : "Bookmark page"}
+          aria-pressed={isBookmarked}
+        >
+          <Bookmark size={14} />
+        </button>
         <button
           className={`mini-btn${searchOpen ? " active" : ""}`}
           onClick={() => setSearchOpen((o) => !o)}
@@ -459,31 +651,159 @@ export default function EpubReader({
       </>
     );
     return () => setControls(null);
-  }, [fontSize, fontFamily, spacingId, layout, searchOpen, setControls]);
+  }, [
+    fontSize,
+    fontFamily,
+    spacingId,
+    layout,
+    searchOpen,
+    isBookmarked,
+    toggleBookmark,
+    setControls,
+  ]);
 
-  /* Render the table of contents into the collapsible sidebar. */
+  /* Render the table of contents + bookmarks/highlights into the sidebar. */
   useEffect(() => {
-    if (toc.length === 0) {
-      setSidebar(null);
-      return () => setSidebar(null);
-    }
+    const notesCount = bookmarks.length + highlights.length;
     setSidebar(
-      <ul className="toc-list">
-        {toc.map((it, i) => (
-          <li key={`${it.href}-${i}`}>
+      <>
+        <div className="sidebar-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarTab === "toc"}
+            className={`sidebar-tab${sidebarTab === "toc" ? " active" : ""}`}
+            onClick={() => setSidebarTab("toc")}
+          >
+            Contents
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarTab === "notes"}
+            className={`sidebar-tab${sidebarTab === "notes" ? " active" : ""}`}
+            onClick={() => setSidebarTab("notes")}
+          >
+            Saved
+            {notesCount > 0 && (
+              <span className="sidebar-badge">{notesCount}</span>
+            )}
+          </button>
+        </div>
+
+        {sidebarTab === "toc" ? (
+          toc.length === 0 ? (
+            <p className="reader-sidebar-empty">No contents to show.</p>
+          ) : (
+            <ul className="toc-list">
+              {toc.map((it, i) => (
+                <li key={`${it.href}-${i}`}>
+                  <button
+                    className={`toc-item${i === activeToc ? " active" : ""}`}
+                    style={{ paddingLeft: 12 + it.depth * 14 }}
+                    onClick={() => renditionRef.current?.display(it.href)}
+                  >
+                    {it.label || "Untitled"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : notesCount === 0 ? (
+          <p className="reader-sidebar-empty">
+            No bookmarks or highlights yet. Press <strong>B</strong> to bookmark
+            a page, or select text in the book to highlight a quote.
+          </p>
+        ) : (
+          <div className="sidebar-notes">
             <button
-              className={`toc-item${i === activeToc ? " active" : ""}`}
-              style={{ paddingLeft: 12 + it.depth * 14 }}
-              onClick={() => renditionRef.current?.display(it.href)}
+              type="button"
+              className="secondary-action sidebar-copy-btn"
+              onClick={copyAllNotes}
             >
-              {it.label || "Untitled"}
+              <Copy size={13} />
+              {copiedNote ? "Copied Markdown!" : "Copy as Markdown"}
             </button>
-          </li>
-        ))}
-      </ul>
+
+            {bookmarks.length > 0 && (
+              <div className="sidebar-section">
+                <span className="reader-sidebar-title">Bookmarks</span>
+                <ul className="toc-list">
+                  {bookmarks.map((bm) => (
+                    <li key={bm.id} className="sidebar-note-row">
+                      <button
+                        type="button"
+                        className="toc-item"
+                        onClick={() => {
+                          if (bm.cfi) void renditionRef.current?.display(bm.cfi);
+                        }}
+                      >
+                        {bm.label}
+                      </button>
+                      <button
+                        type="button"
+                        className="note-del-btn"
+                        onClick={() => removeBookmark(bm.id)}
+                        title="Remove bookmark"
+                        aria-label="Remove bookmark"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {highlights.length > 0 && (
+              <div className="sidebar-section">
+                <span className="reader-sidebar-title">Highlights</span>
+                <ul className="toc-list">
+                  {highlights.map((hl) => (
+                    <li key={hl.id} className="sidebar-note-row highlight-row">
+                      <button
+                        type="button"
+                        className="toc-item highlight-item"
+                        onClick={() =>
+                          void renditionRef.current?.display(hl.cfiRange)
+                        }
+                      >
+                        <span className="highlight-quote">“{hl.text}”</span>
+                        {hl.chapter && (
+                          <span className="highlight-chapter">{hl.chapter}</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="note-del-btn"
+                        onClick={() => removeHighlight(hl)}
+                        title="Remove highlight"
+                        aria-label="Remove highlight"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </>
     );
     return () => setSidebar(null);
-  }, [toc, activeToc, setSidebar]);
+  }, [
+    toc,
+    activeToc,
+    sidebarTab,
+    bookmarks,
+    highlights,
+    copiedNote,
+    copyAllNotes,
+    removeBookmark,
+    removeHighlight,
+    setSidebar,
+  ]);
 
   return (
     <div className="format-reader">
@@ -497,6 +817,38 @@ export default function EpubReader({
         searched={searched}
         onPick={pickSearch}
       />
+      {pendingSel && (
+        <div className="selection-bar" role="region" aria-label="Selected text actions">
+          <span className="selection-preview">“{pendingSel.text}”</span>
+          <button
+            type="button"
+            className="add-article-btn selection-btn"
+            onClick={addHighlight}
+          >
+            <Highlighter size={14} />
+            Highlight
+          </button>
+          <button
+            type="button"
+            className="secondary-action selection-btn"
+            onClick={() => {
+              void navigator.clipboard?.writeText(pendingSel.text);
+              setPendingSel(null);
+            }}
+          >
+            <Copy size={13} />
+            Copy
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setPendingSel(null)}
+            aria-label="Dismiss selection"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {status === "loading" && !needsPassphrase && (
         <div className="pane-overlay">
           <Loader2 className="spin" size={26} />

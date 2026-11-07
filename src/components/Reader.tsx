@@ -1,5 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, Keyboard, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Keyboard,
+  Maximize2,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  X,
+} from "lucide-react";
 import type { Book } from "../books";
 import { navigate, useSidebarOpen, type Theme } from "../lib";
 import EpubReader from "./EpubReader";
@@ -16,8 +24,9 @@ const SHORTCUTS: [string, string][] = [
   ["← / →, J / K", "Previous / next page"],
   ["Space / Shift+Space", "Next / previous page"],
   ["S", "Toggle the contents sidebar"],
+  ["Z", " Distraction-free focus mode"],
   ["F", "Fullscreen"],
-  ["Esc", "Close the search panel or dialogs"],
+  ["Esc", "Close panels or exit focus mode"],
   ["?", "This shortcut list"],
 ];
 
@@ -29,13 +38,14 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
   // collapsible left pane.
   const [sidebar, setSidebar] = useState<ReactNode>(null);
   const { sidebarOpen, toggleSidebar } = useSidebarOpen();
+  const [zenMode, setZenMode] = useState(false);
 
   // Reading position as 0..1, reported by the active reader — drawn as the
   // thin progress line under the topbar.
   const [pct, setPct] = useState<number | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
-  /* Reader-level shortcuts: sidebar, fullscreen, help. */
+  /* Reader-level shortcuts: sidebar, zen mode, fullscreen, help. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -45,11 +55,18 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
       ) {
         return;
       }
-      if (e.key === "Escape" && showHelp) {
-        setShowHelp(false);
-        return;
+      if (e.key === "Escape") {
+        if (showHelp) {
+          setShowHelp(false);
+          return;
+        }
+        if (zenMode) {
+          setZenMode(false);
+          return;
+        }
       }
       if (e.key === "s") toggleSidebar();
+      if (e.key === "z") setZenMode((z) => !z);
       if (e.key === "f") {
         if (document.fullscreenElement) void document.exitFullscreen();
         else void document.documentElement.requestFullscreen();
@@ -58,10 +75,21 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showHelp, toggleSidebar]);
+  }, [showHelp, zenMode, toggleSidebar]);
 
   return (
-    <div className="reader-shell">
+    <div className={`reader-shell${zenMode ? " zen-mode" : ""}`}>
+      {zenMode && (
+        <button
+          type="button"
+          className="zen-exit-btn"
+          onClick={() => setZenMode(false)}
+          title="Exit focus mode (Z or Esc)"
+          aria-label="Exit focus mode"
+        >
+          <Minimize2 size={14} />
+        </button>
+      )}
       <header className="topbar reader-topbar">
         <div className="topbar-actions">
           <button className="secondary-action" onClick={() => navigate("#/")}>
@@ -86,6 +114,14 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
         </div>
         <div className="topbar-actions">
           {controls}
+          <button
+            className="icon-btn"
+            onClick={() => setZenMode(true)}
+            title="Focus mode (Z)"
+            aria-label="Focus mode"
+          >
+            <Maximize2 size={15} />
+          </button>
           <button
             className="icon-btn"
             onClick={() => setShowHelp((h) => !h)}

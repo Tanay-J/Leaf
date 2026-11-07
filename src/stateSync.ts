@@ -341,6 +341,11 @@ function applyState(merged: StatePayload): void {
     for (const [id, rec] of Object.entries(merged.pins)) {
       const existing = byId.get(id);
       if (existing) {
+        const remoteNewer = (rec.updatedAt ?? 0) > (existing.updatedAt ?? 0);
+        if (remoteNewer && rec.title) existing.title = rec.title;
+        if (remoteNewer && rec.author !== undefined) {
+          existing.author = rec.author || undefined;
+        }
         existing.pinnedAt = rec.pinnedAt ?? existing.addedAt;
         existing.removedAt = rec.removedAt;
         existing.updatedAt = Math.max(existing.updatedAt ?? 0, rec.updatedAt ?? 0);

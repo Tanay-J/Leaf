@@ -1,29 +1,41 @@
 import { useEffect, useRef, useState } from "react";
 import { Minus, Plus, Type } from "lucide-react";
 import { FONT_OPTIONS, LINE_HEIGHT_OPTIONS } from "../typography";
+import type { EpubLayout } from "../lib";
 
 interface Props {
   fontId: string;
   spacingId: string;
   fontSize: number;
+  layout?: EpubLayout;
   onFont: (id: string) => void;
   onSpacing: (id: string) => void;
   /** Size change in %, e.g. ±10. */
   onSize: (delta: number) => void;
+  onLayout?: (layout: EpubLayout) => void;
 }
+
+const LAYOUT_OPTIONS: { id: EpubLayout; label: string }[] = [
+  { id: "single", label: "1 Page" },
+  { id: "spread", label: "2 Pages" },
+  { id: "scroll", label: "Scroll" },
+];
 
 /**
  * The "Aa" typography popover shared by the EPUB and article readers:
- * font picker (rendered in each face), size stepper, and line spacing.
+ * font picker (rendered in each face), size stepper, line spacing, and
+ * optional EPUB layout mode.
  * Closes on outside click or Escape and restores focus to its trigger.
  */
 export default function TypographyMenu({
   fontId,
   spacingId,
   fontSize,
+  layout,
   onFont,
   onSpacing,
   onSize,
+  onLayout,
 }: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -113,6 +125,23 @@ export default function TypographyMenu({
               ))}
             </div>
           </div>
+
+          {onLayout && layout && (
+            <div className="typo-group">
+              <span className="typo-label">Page layout</span>
+              <div className="typo-layout" role="group" aria-label="Page layout">
+                {LAYOUT_OPTIONS.map((o) => (
+                  <button
+                    key={o.id}
+                    className={layout === o.id ? "active" : ""}
+                    onClick={() => onLayout(o.id)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

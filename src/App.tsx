@@ -7,7 +7,7 @@ import ArticleReader from "./components/ArticleReader";
 import { addArticle, getArticle } from "./articles";
 import { initSync } from "./articleSync";
 import { initStateSync } from "./stateSync";
-import { findBook } from "./userBooks";
+import { findBook, USER_BOOKS_CHANGED_EVENT } from "./userBooks";
 import { loadCatalog } from "./books";
 import BookDetail from "./components/BookDetail";
 import Stats from "./components/Stats";
@@ -31,8 +31,11 @@ export default function App() {
     loadCatalog().then(() => {
       if (alive) setCatalogTick((t) => t + 1);
     });
+    const onUserBooks = () => setCatalogTick((t) => t + 1);
+    window.addEventListener(USER_BOOKS_CHANGED_EVENT, onUserBooks);
     return () => {
       alive = false;
+      window.removeEventListener(USER_BOOKS_CHANGED_EVENT, onUserBooks);
     };
   }, []);
 

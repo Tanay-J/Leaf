@@ -9,7 +9,13 @@ import { ChevronLeft, ChevronRight, Loader2, Search } from "lucide-react";
 import ePub from "epubjs";
 import type { Book as EpubBook, Rendition } from "epubjs";
 import type { Book } from "../books";
-import { addReadingSeconds, loadProgress, saveProgress, type Theme } from "../lib";
+import {
+  addReadingSeconds,
+  loadProgress,
+  saveProgress,
+  type EpubLayout,
+  type Theme,
+} from "../lib";
 import { loadBook } from "../bookLoader";
 import SearchPanel, { type SearchHit } from "./SearchPanel";
 import TypographyMenu from "./TypographyMenu";
@@ -81,6 +87,9 @@ export default function EpubReader({
     const opt = LINE_HEIGHT_OPTIONS.find((o) => o.value === lh);
     return opt?.id ?? DEFAULT_SPACING_ID;
   });
+  const [layout, setLayout] = useState<EpubLayout>(
+    () => loadProgress(book.id).layout ?? "single"
+  );
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading"
   );
@@ -109,7 +118,8 @@ export default function EpubReader({
         rendition = eb.renderTo(el, {
           width: "100%",
           height: "100%",
-          spread: "none",
+          spread: layout === "spread" ? "auto" : "none",
+          flow: layout === "scroll" ? "scrolled-doc" : "paginated",
         });
         renditionRef.current = rendition;
 
@@ -239,11 +249,11 @@ export default function EpubReader({
       rendition?.destroy();
       eb?.destroy();
     };
-  }, [book.id, book.url, unlockAttempt]);
+  }, [book.id, book.url, unlockAttempt, layout]);
 
   /* Called by PassphrasePrompt once the visitor submits a passphrase. */
-  const handleUnlock = (pw: string) => {
-    setStoredPassphrase(pw);
+  const handleUnlock = (pw: string, remember: boolean) => {
+    setStoredPassphrase(pw, remember);
     setNeedsPassphrase(false);
     setWrongPassphrase(false);
     setStatus("loading");
@@ -293,8 +303,9 @@ export default function EpubReader({
       fontSize,
       fontFamily,
       lineHeight: spacingValueFor(spacingId),
+      layout,
     });
-  }, [fontSize, fontFamily, spacingId, book.id]);
+  }, [fontSize, fontFamily, spacingId, layout, book.id]);
 
   const changeFont = (delta: number) =>
     setFontSize((f) => Math.min(200, Math.max(60, f + delta)));
@@ -439,14 +450,16 @@ export default function EpubReader({
           fontId={fontFamily}
           spacingId={spacingId}
           fontSize={fontSize}
+          layout={layout}
           onFont={setFontFamily}
           onSpacing={setSpacingId}
           onSize={changeFont}
+          onLayout={setLayout}
         />
       </>
     );
     return () => setControls(null);
-  }, [fontSize, fontFamily, spacingId, searchOpen, setControls]);
+  }, [fontSize, fontFamily, spacingId, layout, searchOpen, setControls]);
 
   /* Render the table of contents into the collapsible sidebar. */
   useEffect(() => {
@@ -507,7 +520,30 @@ export default function EpubReader({
           </p>
         </div>
       )}
-      <div ref={viewerRef} className="epub-viewer" />
+      <div className="reader-stage-area">
+        {layout !== "scroll" && (
+          <button
+            type="button"
+            className="edge-tap edge-tap-left"
+            onClick={goPrev}
+            aria-label="Previous page"
+            tabIndex={-1}
+          />
+        )}
+        <div
+          ref={viewerRef}
+          className={`epub-viewer${layout === "spread" ? " epub-spread" : ""}`}
+        />
+        {layout !== "scroll" && (
+          <button
+            type="button"
+            className="edge-tap edge-tap-right"
+            onClick={goNext}
+            aria-label="Next page"
+            tabIndex={-1}
+          />
+        )}
+      </div>
       <footer className="reader-navbar">
         <button className="nav-btn" onClick={goPrev}>
           <ChevronLeft size={15} />

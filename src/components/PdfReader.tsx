@@ -169,8 +169,8 @@ export default function PdfReader({
   }, [book.url, unlockAttempt]);
 
   /* Called by PassphrasePrompt once the visitor submits a passphrase. */
-  const handleUnlock = (pw: string) => {
-    setStoredPassphrase(pw);
+  const handleUnlock = (pw: string, remember: boolean) => {
+    setStoredPassphrase(pw, remember);
     setNeedsPassphrase(false);
     setWrongPassphrase(false);
     setOutline([]);
@@ -494,10 +494,28 @@ export default function PdfReader({
           </p>
         </div>
       )}
-      <div className="pdf-scroll">
-        <canvas
-          ref={canvasRef}
-          className={`pdf-canvas${invert ? " inverted" : ""}`}
+      <div className="reader-stage-area">
+        <button
+          type="button"
+          className="edge-tap edge-tap-left"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => clampPage(p - 1))}
+          aria-label="Previous page"
+          tabIndex={-1}
+        />
+        <div className="pdf-scroll">
+          <canvas
+            ref={canvasRef}
+            className={`pdf-canvas${invert ? " inverted" : ""}`}
+          />
+        </div>
+        <button
+          type="button"
+          className="edge-tap edge-tap-right"
+          disabled={!!numPages && page >= numPages}
+          onClick={() => setPage((p) => clampPage(p + 1))}
+          aria-label="Next page"
+          tabIndex={-1}
         />
       </div>
       <footer className="reader-navbar">

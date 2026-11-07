@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent,
   type FormEvent,
 } from "react";
 import {
@@ -15,9 +16,11 @@ import {
   FolderOpen,
   Info,
   LayoutGrid,
+  Link,
   List,
   Loader2,
   Newspaper,
+  Play,
   Plus,
   Search,
   Trash2,
@@ -233,19 +236,35 @@ export default function Library({ theme, onCycleTheme }: Props) {
     return sorted;
   }, [tab, mineFiltered, catalogFiltered, sort]);
 
+  /* Most recently read in-progress book for the "Continue reading" hero card. */
+  const continueBook = useMemo(() => {
+    const candidates = [...books, ...catalog.filter((b) => !mineIds.has(b.id))];
+    let best: Book | null = null;
+    let bestTs = 0;
+    for (const b of candidates) {
+      const p = loadProgress(b.id);
+      if (!p.finishedAt && p.lastReadAt && p.lastReadAt > bestTs) {
+        bestTs = p.lastReadAt;
+        best = b;
+      }
+    }
+    return best;
+  }, [books, catalog, mineIds]);
+
   /* ---- "Add book" modal state ---- */
   const [showAdd, setShowAdd] = useState(false);
+  const [addTab, setAddTab] = useState<"device" | "vault" | "link">("device");
   const [addUrl, setAddUrl] = useState("");
   const [addTitle, setAddTitle] = useState("");
   const [addAuthor, setAddAuthor] = useState("");
   const [addType, setAddType] = useState<BookType>("epub");
   const [addError, setAddError] = useState("");
   const [addBusy, setAddBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = ""; // allow re-picking the same files later
+  const importLocalFiles = (files: File[]) => {
     if (files.length === 0) return;
     setAddError("");
     setAddBusy(true);
@@ -253,6 +272,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
       let added = 0;
       let skipped = 0;
       for (const file of files) {
+        if (!/\.(epub|pdf)$/i.test(file.name)) continue;
         // Duplicate detection: identical content anywhere in the library?
         const sha = await hashBlob(file);
         const dupKey = sha ? await findKeyBySha(sha) : null;
@@ -266,8 +286,8 @@ export default function Library({ theme, onCycleTheme }: Props) {
           meta = await readEpubMeta(file);
         }
         const { book } = await addLocalBook(file, sha ?? undefined, {
-          title: meta?.title,
-          author: meta?.author,
+          title: (files.length === 1 && addTitle.trim()) || meta?.title,
+          author: (files.length === 1 && addAuthor.trim()) || meta?.author,
         });
         if (meta?.cover) await saveCover(book.id, meta.cover);
         added++;
@@ -277,7 +297,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
         return;
       }
       if (added === 0 && files.length === 1) {
-        setAddError("Could not add that file.");
+        setAddError("Could not add that file (only .epub and .pdf are supported).");
         return;
       }
       setAddUrl("");
@@ -285,6 +305,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
       setAddAuthor("");
       setAddType("epub");
       setShowAdd(false);
+      setTab("mine");
     })()
       .catch((err) => {
         setAddError(
@@ -292,6 +313,44 @@ export default function Library({ theme, onCycleTheme }: Props) {
         );
       })
       .finally(() => setAddBusy(false));
+  };
+
+  const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // allow re-picking the same files later
+    importLocalFiles(files);
+  };
+
+  const onDragEnter = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragDepth.current++;
+    setDragging(true);
+  };
+
+  const onDragOver = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+  };
+
+  const onDragLeave = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  };
+
+  const onDrop = (e: DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files ?? []).filter((f) =>
+      /\.(epub|pdf)$/i.test(f.name)
+    );
+    if (files.length > 0) {
+      importLocalFiles(files);
+    }
   };
 
   const onUrlChange = (v: string) => {
@@ -528,7 +587,22 @@ export default function Library({ theme, onCycleTheme }: Props) {
   };
 
 return (
-    <div className="library">
+    <div
+      className="library"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {dragging && (
+        <div className="drop-overlay" aria-hidden="true">
+          <div className="drop-overlay-card">
+            <FolderOpen size={32} />
+            <strong>Drop EPUB or PDF files to add to your library</strong>
+            <span>Stored privately in this browser</span>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div className="brand-block">
           <div className="brand-mark">
@@ -588,6 +662,58 @@ return (
       </header>
 
       <main className="content">
+        {tab === "mine" &&
+          continueBook &&
+          query.trim() === "" &&
+          statusFilter === "all" && (() => {
+            const cProg = progressInfo(continueBook);
+            const cCover = covers[continueBook.id] ?? continueBook.cover ?? null;
+            return (
+              <div className="continue-hero">
+                <button
+                  type="button"
+                  className="continue-card"
+                  onClick={() =>
+                    navigate(`#/book/${encodeURIComponent(continueBook.id)}`)
+                  }
+                >
+                  <div className="continue-cover">
+                    {cCover ? (
+                      <img src={cCover} alt="" className="book-cover-img" />
+                    ) : continueBook.type === "epub" ? (
+                      <BookOpen size={24} />
+                    ) : (
+                      <FileText size={24} />
+                    )}
+                  </div>
+                  <div className="continue-body">
+                    <span className="continue-eyebrow">Continue reading</span>
+                    <strong>{continueBook.title}</strong>
+                    {continueBook.author && (
+                      <span className="continue-author">{continueBook.author}</span>
+                    )}
+                    {cProg.label && (
+                      <div className="continue-progress">
+                        <span>{cProg.label}</span>
+                        {cProg.pct !== null && (
+                          <div className="progress-track">
+                            <span
+                              style={{ width: `${Math.round(cProg.pct * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <span className="continue-cta">
+                    <Play size={14} />
+                    Resume
+                  </span>
+                </button>
+              </div>
+            );
+          })()}
+
         {tab === "mine" && (stats.finished > 0 || stats.inProgress > 0) && (
           <p className="reading-stats">
             {stats.finished} finished · {stats.inProgress} in progress
@@ -789,10 +915,11 @@ return (
             })}
           </div>
         ) : (
-<div className="book-list">
+          <div className="book-list">
             {shown.map((b) => {
               const prog = progressInfo(b);
               const isMine = mineIds.has(b.id);
+              const coverSrc = covers[b.id] ?? b.cover ?? null;
               return (
                 <div className="book-list-row-wrap" key={b.id}>
                   <button
@@ -802,7 +929,13 @@ return (
                     }
                   >
                     <div className="book-list-icon">
-                      {b.type === "epub" ? (
+                      {coverSrc ? (
+                        <img
+                          className="book-list-cover"
+                          src={coverSrc}
+                          alt=""
+                        />
+                      ) : b.type === "epub" ? (
                         <BookOpen size={18} />
                       ) : (
                         <FileText size={18} />
@@ -903,271 +1036,341 @@ return (
               </button>
             </div>
 
-            <label className="field">
-              <span>File URL</span>
-              <input
-                type="text"
-                value={addUrl}
-                onChange={(e) => onUrlChange(e.target.value)}
-                placeholder="https://example.com/book.epub"
-                autoFocus
-                required
-              />
-            </label>
-
-            <div className="field-row">
-              <label className="field">
-                <span>Title</span>
-                <input
-                  type="text"
-                  value={addTitle}
-                  onChange={(e) => {
-                    setAddTitle(e.target.value);
-                    if (addError) setAddError("");
-                  }}
-                  onBlur={onTitleBlur}
-                  placeholder="Auto from URL if blank"
-                />
-              </label>
-              <label className="field field-type">
-                <span>Type</span>
-                <select
-                  value={addType}
-                  onChange={(e) => setAddType(e.target.value as BookType)}
-                >
-                  <option value="epub">EPUB</option>
-                  <option value="pdf">PDF</option>
-                </select>
-              </label>
+            <div className="modal-tabs" role="tablist" aria-label="How to add book">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={addTab === "device"}
+                className={`modal-tab${addTab === "device" ? " active" : ""}`}
+                onClick={() => {
+                  setAddTab("device");
+                  setAddError("");
+                }}
+              >
+                <FolderOpen size={14} />
+                From Device
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={addTab === "vault"}
+                className={`modal-tab${addTab === "vault" ? " active" : ""}`}
+                onClick={() => {
+                  setAddTab("vault");
+                  setAddError("");
+                }}
+              >
+                <CloudUpload size={14} />
+                To Vault
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={addTab === "link"}
+                className={`modal-tab${addTab === "link" ? " active" : ""}`}
+                onClick={() => {
+                  setAddTab("link");
+                  setAddError("");
+                }}
+              >
+                <Link size={14} />
+                By Link
+              </button>
             </div>
 
-            <label className="field">
-              <span>Author (optional)</span>
-              <input
-                type="text"
-                value={addAuthor}
-                onChange={(e) => setAddAuthor(e.target.value)}
-                placeholder="Author name"
-              />
-            </label>
-
-            <div className="modal-divider">
-              <span>or</span>
-            </div>
-
-            <label className="modal-file-btn">
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".epub,.pdf"
-                multiple
-                onChange={onFilePicked}
-                disabled={addBusy || vaultBusy}
-              />
-              <FolderOpen size={16} />
-              {addBusy
-                ? "Saving to this browser…"
-                : "Choose EPUB/PDF files from this device"}
-            </label>
-            <p className="modal-hint">
-              Files you pick are stored in this browser only — nothing is
-              uploaded.
-            </p>
-
-            <div className="modal-divider">
-              <span>or upload to your vault — reads on every device</span>
-            </div>
-
-            {vaultStatus.state === "connected" ? (
+            {addTab === "device" && (
               <>
-                <label className="modal-file-btn">
+                <label className="modal-file-btn modal-file-drop">
                   <input
-                    ref={vaultFileRef}
+                    ref={fileRef}
                     type="file"
                     accept=".epub,.pdf"
                     multiple
-                    onChange={onVaultFilePicked}
-                    disabled={vaultBusy || addBusy}
+                    onChange={onFilePicked}
+                    disabled={addBusy || vaultBusy}
                   />
-                  {vaultPhase === "upload" ? (
-                    <Loader2 className="spin" size={16} />
-                  ) : (
-                    <CloudUpload size={16} />
-                  )}
-                  {vaultPhase === "upload"
-                    ? `Uploading ${vaultPct}%`
-                    : vaultPhase === "deploy"
-                      ? "Deploying…"
-                      : "Choose EPUB/PDF files to upload to your vault"}
+                  <FolderOpen size={20} />
+                  <span>
+                    {addBusy
+                      ? "Saving to this browser…"
+                      : "Choose EPUB or PDF files from this device"}
+                  </span>
+                  <small>Or drag and drop files anywhere on the library page</small>
                 </label>
-                {vaultPhase === "upload" && (
-                  <div className="vault-progress" aria-hidden="true">
-                    <span style={{ width: `${vaultPct}%` }} />
-                  </div>
-                )}
-                {vaultNote && <p className="vault-note">{vaultNote}</p>}
                 <p className="modal-hint">
-                  Files go to your private vault ({vaultStatus.repo}) and are
-                  published to every device after CI encrypts them. The Title
-                  and Author fields above are saved for the uploaded file.
+                  Files you pick are stored in this browser only — nothing is
+                  uploaded. EPUB titles, authors, and covers are extracted
+                  automatically.
                 </p>
-                <div className="vault-meta-row">
-                  <button
-                    type="button"
-                    className="secondary-action vault-disconnect"
-                    onClick={() => {
-                      vaultDisconnect();
-                      setVaultNote("");
-                      setShowVaultSetup(false);
-                      setShowWatchSetup(false);
-                      setWatchDone(false);
-                    }}
-                    title="Forget the vault token on this device"
-                  >
-                    Disconnect vault
-                  </button>
+              </>
+            )}
+
+            {addTab === "vault" && (
+              <>
+                <div className="field-row">
+                  <label className="field">
+                    <span>Title override (optional)</span>
+                    <input
+                      type="text"
+                      value={addTitle}
+                      onChange={(e) => setAddTitle(e.target.value)}
+                      placeholder="Auto from EPUB/filename if blank"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Author override (optional)</span>
+                    <input
+                      type="text"
+                      value={addAuthor}
+                      onChange={(e) => setAddAuthor(e.target.value)}
+                      placeholder="Author name"
+                    />
+                  </label>
                 </div>
-                {!canWatchDeploys() && !watchDone && (
-                  <div className="vault-meta-row">
-                    <button
-                      type="button"
-                      className="secondary-action vault-disconnect"
-                      onClick={() => setShowWatchSetup((v) => !v)}
-                      title="Live “Deploying…” status and auto-pin after each upload"
-                    >
-                      Add deploy watching
-                    </button>
-                  </div>
-                )}
-                {watchDone && !canWatchDeploys() && (
-                  <p className="vault-note">
-                    Deploy watching is on — uploads now show live
-                    “Deploying…” status.
-                  </p>
-                )}
-                {showWatchSetup && (
-                  <div className="vault-connect">
-                    <label className="field">
-                      <span>Leaf repo (owner/name)</span>
+
+                {vaultStatus.state === "connected" ? (
+                  <>
+                    <label className="modal-file-btn modal-file-drop">
                       <input
-                        type="text"
-                        value={watchLeafRepo}
-                        onChange={(e) => setWatchLeafRepo(e.target.value)}
-                        placeholder="your-name/leaf"
-                        autoComplete="off"
+                        ref={vaultFileRef}
+                        type="file"
+                        accept=".epub,.pdf"
+                        multiple
+                        onChange={onVaultFilePicked}
+                        disabled={vaultBusy || addBusy}
                       />
-                    </label>
-                    <label className="field">
-                      <span>Token with Actions: Read on the Leaf repo</span>
-                      <input
-                        type="password"
-                        value={watchToken}
-                        onChange={(e) => {
-                          setWatchToken(e.target.value);
-                          if (watchError) setWatchError("");
-                        }}
-                        placeholder="github_pat_…"
-                        autoComplete="off"
-                      />
-                    </label>
-                    {watchError && <p className="article-error">{watchError}</p>}
-                    <button
-                      type="button"
-                      className="add-article-btn"
-                      onClick={() => void enableWatch()}
-                      disabled={watchBusy}
-                    >
-                      {watchBusy ? (
-                        <Loader2 className="spin" size={15} />
+                      {vaultPhase === "upload" ? (
+                        <Loader2 className="spin" size={20} />
                       ) : (
-                        <CloudUpload size={15} />
+                        <CloudUpload size={20} />
                       )}
-                      {watchBusy ? "Checking…" : "Enable deploy watching"}
+                      <span>
+                        {vaultPhase === "upload"
+                          ? `Uploading ${vaultPct}%`
+                          : vaultPhase === "deploy"
+                            ? "Deploying…"
+                            : "Choose EPUB/PDF files to upload to your vault"}
+                      </span>
+                    </label>
+                    {vaultPhase === "upload" && (
+                      <div className="vault-progress" aria-hidden="true">
+                        <span style={{ width: `${vaultPct}%` }} />
+                      </div>
+                    )}
+                    {vaultNote && <p className="vault-note">{vaultNote}</p>}
+                    <p className="modal-hint">
+                      Files go to your private vault ({vaultStatus.repo}) and are
+                      published to every device after CI encrypts them.
+                    </p>
+                    <div className="vault-meta-row">
+                      <button
+                        type="button"
+                        className="secondary-action vault-disconnect"
+                        onClick={() => {
+                          vaultDisconnect();
+                          setVaultNote("");
+                          setShowVaultSetup(false);
+                          setShowWatchSetup(false);
+                          setWatchDone(false);
+                        }}
+                        title="Forget the vault token on this device"
+                      >
+                        Disconnect vault
+                      </button>
+                      {!canWatchDeploys() && !watchDone && (
+                        <button
+                          type="button"
+                          className="secondary-action vault-disconnect"
+                          onClick={() => setShowWatchSetup((v) => !v)}
+                          title="Live “Deploying…” status and auto-pin after each upload"
+                        >
+                          Add deploy watching
+                        </button>
+                      )}
+                    </div>
+                    {watchDone && !canWatchDeploys() && (
+                      <p className="vault-note">
+                        Deploy watching is on — uploads now show live
+                        “Deploying…” status.
+                      </p>
+                    )}
+                    {showWatchSetup && (
+                      <div className="vault-connect">
+                        <label className="field">
+                          <span>Leaf repo (owner/name)</span>
+                          <input
+                            type="text"
+                            value={watchLeafRepo}
+                            onChange={(e) => setWatchLeafRepo(e.target.value)}
+                            placeholder="your-name/leaf"
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Token with Actions: Read on the Leaf repo</span>
+                          <input
+                            type="password"
+                            value={watchToken}
+                            onChange={(e) => {
+                              setWatchToken(e.target.value);
+                              if (watchError) setWatchError("");
+                            }}
+                            placeholder="github_pat_…"
+                            autoComplete="off"
+                          />
+                        </label>
+                        {watchError && <p className="article-error">{watchError}</p>}
+                        <button
+                          type="button"
+                          className="add-article-btn"
+                          onClick={() => void enableWatch()}
+                          disabled={watchBusy}
+                        >
+                          {watchBusy ? (
+                            <Loader2 className="spin" size={15} />
+                          ) : (
+                            <CloudUpload size={15} />
+                          )}
+                          {watchBusy ? "Checking…" : "Enable deploy watching"}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="modal-file-btn"
+                      onClick={() => setShowVaultSetup((v) => !v)}
+                    >
+                      <CloudUpload size={16} />
+                      Set up vault uploads
                     </button>
-                  </div>
+                    <p className="modal-hint">
+                      Uploads go to your private GitHub vault; once the deploy
+                      finishes, the book shows up under Browse everywhere you use
+                      Leaf.
+                    </p>
+                    {showVaultSetup && (
+                      <div className="vault-connect">
+                        <label className="field">
+                          <span>Fine-grained token (Contents: Read and write)</span>
+                          <input
+                            type="password"
+                            value={vaultToken}
+                            onChange={(e) => {
+                              setVaultToken(e.target.value);
+                              if (vaultError) setVaultError("");
+                            }}
+                            placeholder="github_pat_…"
+                            autoComplete="off"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Vault repo (owner/name)</span>
+                          <input
+                            type="text"
+                            value={vaultRepo}
+                            onChange={(e) => setVaultRepo(e.target.value)}
+                            placeholder="your-name/book-vault"
+                            autoComplete="off"
+                          />
+                        </label>
+                        <details className="vault-advanced">
+                          <summary>Also watch the Leaf deploy (optional)</summary>
+                          <label className="field">
+                            <span>Leaf repo (owner/name)</span>
+                            <input
+                              type="text"
+                              value={leafRepo}
+                              onChange={(e) => setLeafRepo(e.target.value)}
+                              placeholder="your-name/leaf"
+                              autoComplete="off"
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Token with Actions: Read on the Leaf repo</span>
+                            <input
+                              type="password"
+                              value={vaultLeafToken}
+                              onChange={(e) => setVaultLeafToken(e.target.value)}
+                              placeholder="github_pat_… (leave blank to skip)"
+                              autoComplete="off"
+                            />
+                          </label>
+                        </details>
+                        {vaultError && (
+                          <p className="article-error">{vaultError}</p>
+                        )}
+                        <button
+                          type="button"
+                          className="add-article-btn"
+                          onClick={() => void connectVault()}
+                          disabled={vaultBusy}
+                        >
+                          {vaultBusy ? (
+                            <Loader2 className="spin" size={15} />
+                          ) : (
+                            <CloudUpload size={15} />
+                          )}
+                          {vaultBusy ? "Connecting…" : "Connect vault"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
-            ) : (
+            )}
+
+            {addTab === "link" && (
               <>
-                <button
-                  type="button"
-                  className="modal-file-btn"
-                  onClick={() => setShowVaultSetup((v) => !v)}
-                >
-                  <CloudUpload size={16} />
-                  Set up vault uploads
-                </button>
-                <p className="modal-hint">
-                  Uploads go to your private GitHub vault; once the deploy
-                  finishes, the book shows up under Browse everywhere you use
-                  Leaf.
-                </p>
-                {showVaultSetup && (
-                  <div className="vault-connect">
-                    <label className="field">
-                      <span>Fine-grained token (Contents: Read and write)</span>
-                      <input
-                        type="password"
-                        value={vaultToken}
-                        onChange={(e) => {
-                          setVaultToken(e.target.value);
-                          if (vaultError) setVaultError("");
-                        }}
-                        placeholder="github_pat_…"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Vault repo (owner/name)</span>
-                      <input
-                        type="text"
-                        value={vaultRepo}
-                        onChange={(e) => setVaultRepo(e.target.value)}
-                        placeholder="your-name/book-vault"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <details className="vault-advanced">
-                      <summary>Also watch the Leaf deploy (optional)</summary>
-                      <label className="field">
-                        <span>Leaf repo (owner/name)</span>
-                        <input
-                          type="text"
-                          value={leafRepo}
-                          onChange={(e) => setLeafRepo(e.target.value)}
-                          placeholder="your-name/leaf"
-                          autoComplete="off"
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Token with Actions: Read on the Leaf repo</span>
-                        <input
-                          type="password"
-                          value={vaultLeafToken}
-                          onChange={(e) => setVaultLeafToken(e.target.value)}
-                          placeholder="github_pat_… (leave blank to skip)"
-                          autoComplete="off"
-                        />
-                      </label>
-                    </details>
-                    {vaultError && (
-                      <p className="article-error">{vaultError}</p>
-                    )}
-                    <button
-                      type="button"
-                      className="add-article-btn"
-                      onClick={() => void connectVault()}
-                      disabled={vaultBusy}
+                <label className="field">
+                  <span>File URL</span>
+                  <input
+                    type="text"
+                    value={addUrl}
+                    onChange={(e) => onUrlChange(e.target.value)}
+                    placeholder="https://example.com/book.epub"
+                    autoFocus
+                    required
+                  />
+                </label>
+
+                <div className="field-row">
+                  <label className="field">
+                    <span>Title</span>
+                    <input
+                      type="text"
+                      value={addTitle}
+                      onChange={(e) => {
+                        setAddTitle(e.target.value);
+                        if (addError) setAddError("");
+                      }}
+                      onBlur={onTitleBlur}
+                      placeholder="Auto from URL if blank"
+                    />
+                  </label>
+                  <label className="field field-type">
+                    <span>Type</span>
+                    <select
+                      value={addType}
+                      onChange={(e) => setAddType(e.target.value as BookType)}
                     >
-                      {vaultBusy ? (
-                        <Loader2 className="spin" size={15} />
-                      ) : (
-                        <CloudUpload size={15} />
-                      )}
-                      {vaultBusy ? "Connecting…" : "Connect vault"}
-                    </button>
-                  </div>
-                )}
+                      <option value="epub">EPUB</option>
+                      <option value="pdf">PDF</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label className="field">
+                  <span>Author (optional)</span>
+                  <input
+                    type="text"
+                    value={addAuthor}
+                    onChange={(e) => setAddAuthor(e.target.value)}
+                    placeholder="Author name"
+                  />
+                </label>
               </>
             )}
 
@@ -1179,16 +1382,18 @@ return (
                 className="secondary-action"
                 onClick={() => setShowAdd(false)}
               >
-                Cancel
+                Close
               </button>
-              <button
-                type="submit"
-                className="add-article-btn"
-                disabled={addBusy}
-              >
-                <Plus size={15} />
-                Add to library
-              </button>
+              {addTab === "link" && (
+                <button
+                  type="submit"
+                  className="add-article-btn"
+                  disabled={addBusy}
+                >
+                  <Plus size={15} />
+                  Add to library
+                </button>
+              )}
             </div>
           </form>
         </div>

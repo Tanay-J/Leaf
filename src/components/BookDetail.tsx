@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   BookOpen,
   Check,
   FileText,
+  Pencil,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import type { Book } from "../books";
 import { navigate, loadProgress, type Theme } from "../lib";
@@ -15,6 +17,7 @@ import {
   getMyLibrary,
   pinBook,
   removeUserBook,
+  updateBookMeta,
   USER_BOOKS_CHANGED_EVENT,
 } from "../userBooks";
 import ThemeButton from "./ThemeButton";
@@ -49,6 +52,20 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
     getMyLibrary().some((b) => b.id === book.id)
   );
   const [, setTimeTick] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(book.title);
+  const [editAuthor, setEditAuthor] = useState(book.author ?? "");
+
+  useEffect(() => {
+    setEditTitle(book.title);
+    setEditAuthor(book.author ?? "");
+  }, [book.title, book.author]);
+
+  const submitEdit = (e: FormEvent) => {
+    e.preventDefault();
+    updateBookMeta(book, { title: editTitle, author: editAuthor });
+    setEditing(false);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -120,8 +137,63 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
           </div>
 
           <div className="detail-main">
-            <h2>{book.title}</h2>
-            {book.author && <p className="book-author">{book.author}</p>}
+            {editing ? (
+              <form className="detail-edit-form" onSubmit={submitEdit}>
+                <label className="field">
+                  <span>Title</span>
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Author</span>
+                  <input
+                    type="text"
+                    value={editAuthor}
+                    onChange={(e) => setEditAuthor(e.target.value)}
+                    placeholder="Author name (optional)"
+                  />
+                </label>
+                <div className="detail-edit-actions">
+                  <button type="submit" className="add-article-btn">
+                    <Check size={14} />
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() => {
+                      setEditTitle(book.title);
+                      setEditAuthor(book.author ?? "");
+                      setEditing(false);
+                    }}
+                  >
+                    <X size={14} />
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="detail-title-row">
+                <div>
+                  <h2>{book.title}</h2>
+                  {book.author && <p className="book-author">{book.author}</p>}
+                </div>
+                <button
+                  type="button"
+                  className="mini-btn"
+                  onClick={() => setEditing(true)}
+                  title="Edit title & author"
+                  aria-label="Edit title and author"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+            )}
             <p className="detail-status">{status}</p>
 
             {pct != null && (

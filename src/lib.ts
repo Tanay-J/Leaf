@@ -111,6 +111,8 @@ export function useLibraryView() {
 
 /* ---------- reading progress (per browser, via localStorage) ---------- */
 
+export type EpubLayout = "single" | "spread" | "scroll";
+
 export interface BookProgress {
   cfi?: string;
   chapter?: string;
@@ -118,6 +120,8 @@ export interface BookProgress {
   fontFamily?: string;
   /** Line-spacing multiplier applied in the reader (undefined = book's own). */
   lineHeight?: number;
+  /** EPUB layout mode: single column, two-column spread, or continuous scroll. */
+  layout?: EpubLayout;
   page?: number;
   total?: number;
   /** Reading position as 0..1 (EPUBs; PDFs derive it from page/total). */

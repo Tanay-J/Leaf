@@ -2447,3 +2447,354 @@ html.dark-theme .brand-mark-articles {
   color: var(--text-main);
   white-space: nowrap;
 }
+
+/* ---------- UI/UX Improvements: Continue Reading, Dropzone, Modal Tabs, Reader UX ---------- */
+
+/* Continue reading hero card */
+.continue-hero {
+  margin-bottom: 18px;
+}
+
+.continue-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-card);
+  text-align: left;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.04);
+  transition: all 0.18s ease;
+}
+
+.continue-card:hover {
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.1);
+}
+
+.continue-cover {
+  position: relative;
+  width: 56px;
+  height: 78px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+}
+
+html.dark-theme .continue-cover {
+  background: linear-gradient(135deg, #1d4ed8, #1e293b);
+}
+
+.continue-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.continue-eyebrow {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--primary-color);
+}
+
+.continue-body strong {
+  font-size: 15.5px;
+  font-weight: 800;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.continue-author {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.continue-progress {
+  margin-top: 4px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-subtle);
+}
+
+.continue-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  background: var(--primary-color);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease;
+}
+
+.continue-card:hover .continue-cta {
+  background: var(--primary-hover);
+}
+
+@media (max-width: 560px) {
+  .continue-cta {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+}
+
+/* List view cover thumbnail */
+.book-list-icon {
+  position: relative;
+  overflow: hidden;
+}
+
+.book-list-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Whole-window drag & drop overlay */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, var(--bg-app) 82%, transparent);
+  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 48px;
+  border: 2px dashed var(--primary-color);
+  border-radius: 16px;
+  background: var(--bg-card);
+  color: var(--primary-color);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.14);
+  text-align: center;
+}
+
+.drop-overlay-card strong {
+  font-size: 16px;
+  color: var(--text-main);
+}
+
+.drop-overlay-card span {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Tabbed Add Book modal */
+.modal-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-app);
+}
+
+.modal-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: 12.5px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.modal-tab:hover {
+  color: var(--primary-color);
+}
+
+.modal-tab.active {
+  background: var(--bg-card);
+  color: var(--primary-color);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.modal-file-drop {
+  flex-direction: column;
+  padding: 24px 18px;
+  gap: 6px;
+  text-align: center;
+}
+
+.modal-file-drop small {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-subtle);
+}
+
+.vault-meta-row {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Reader stage area, edge tap zones, spread & zen mode */
+.reader-stage-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.epub-viewer.epub-spread {
+  max-width: 1280px;
+}
+
+.edge-tap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: min(11%, 76px);
+  z-index: 4;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.edge-tap:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--primary-color) 6%, transparent);
+}
+
+.edge-tap:disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.edge-tap-left {
+  left: 0;
+}
+
+.edge-tap-right {
+  right: 0;
+}
+
+.reader-shell.zen-mode .reader-topbar,
+.reader-shell.zen-mode .reader-navbar,
+.reader-shell.zen-mode .reader-sidebar {
+  display: none;
+}
+
+.zen-exit-btn {
+  position: fixed;
+  top: 12px;
+  right: 14px;
+  z-index: 45;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-card) 85%, transparent);
+  backdrop-filter: blur(8px);
+  color: var(--text-subtle);
+  opacity: 0.45;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.zen-exit-btn:hover {
+  opacity: 1;
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+/* Typography layout switcher */
+.typo-layout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.typo-layout button {
+  border: 1px solid var(--border-color);
+  background: var(--tag-bg);
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.typo-layout button:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.typo-layout button.active {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: var(--primary-bg);
+}
+
+/* Passphrase remember checkbox */
+.gate-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  margin: 2px 0;
+}
+
+/* Book detail inline metadata editing */
+.detail-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+  max-width: 440px;
+}
+
+.detail-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

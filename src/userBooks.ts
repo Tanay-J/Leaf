@@ -243,6 +243,45 @@ export function removeUserBook(id: string): void {
   );
 }
 
+/**
+ * Updates the title and/or author of a book in My library (or pins a catalog
+ * book with the custom metadata). Touching updatedAt propagates the edit to
+ * other devices via stateSync.
+ */
+export function updateBookMeta(
+  book: Book,
+  meta: { title: string; author: string }
+): UserBook {
+  const title = meta.title.trim() || book.title;
+  const author = meta.author.trim();
+  const list = readAll();
+  const now = Date.now();
+  const existing = list.find((b) => b.id === book.id);
+  if (existing) {
+    const next: UserBook = {
+      ...existing,
+      title,
+      author: author || undefined,
+      updatedAt: now,
+    };
+    if (!author) delete next.author;
+    persist(list.map((b) => (b.id === book.id ? next : b)));
+    return next;
+  }
+  const entry: UserBook = {
+    ...book,
+    title,
+    ...(author ? { author } : {}),
+    addedAt: now,
+    pinnedAt: now,
+    removedAt: null,
+    updatedAt: now,
+  };
+  if (!author) delete entry.author;
+  persist([entry, ...list]);
+  return entry;
+}
+
 /** "My Novel.epub" -> "My Novel" */
 export function titleFromFileName(name: string): string {
   const base = name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();

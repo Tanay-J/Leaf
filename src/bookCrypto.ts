@@ -13,6 +13,7 @@
  * transit. Those are handled by bookLoader via IndexedDB, not here.
  */
 const SESSION_KEY = "reader-passphrase";
+const PERSIST_KEY = "leaf:passphrase";
 const PBKDF2_ITERATIONS = 310_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
@@ -35,17 +36,25 @@ export class WrongPassphraseError extends Error {
 
 export function getStoredPassphrase(): string | null {
   try {
-    return sessionStorage.getItem(SESSION_KEY);
+    return (
+      sessionStorage.getItem(SESSION_KEY) ??
+      localStorage.getItem(PERSIST_KEY)
+    );
   } catch {
     return null;
   }
 }
 
-export function setStoredPassphrase(pw: string): void {
+export function setStoredPassphrase(pw: string, remember = false): void {
   try {
     sessionStorage.setItem(SESSION_KEY, pw);
+    if (remember) {
+      localStorage.setItem(PERSIST_KEY, pw);
+    } else {
+      localStorage.removeItem(PERSIST_KEY);
+    }
   } catch {
-    // sessionStorage unavailable (private mode) — decryption still works
+    // storage unavailable (private mode) — decryption still works
     // for this load; the next one will ask again.
   }
 }
@@ -53,6 +62,7 @@ export function setStoredPassphrase(pw: string): void {
 function clearStoredPassphrase(): void {
   try {
     sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(PERSIST_KEY);
   } catch {
     // ignore
   }

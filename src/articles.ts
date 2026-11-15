@@ -37,6 +37,23 @@ const STORAGE_KEY = "leaf:articles";
 /** Fired by persist(); the sync engine listens to schedule a push. */
 export const ARTICLES_CHANGED_EVENT = "leaf:articles-changed";
 
+/** Predefined category tags available out-of-the-box for organizing articles. */
+export const PREDEFINED_TAGS: readonly { id: string; label: string }[] = [
+  { id: "tech", label: "Tech" },
+  { id: "ai", label: "AI" },
+  { id: "design", label: "Design" },
+  { id: "business", label: "Business" },
+  { id: "science", label: "Science" },
+  { id: "culture", label: "Culture" },
+  { id: "essays", label: "Essays" },
+];
+
+export function formatTagLabel(tag: string): string {
+  const found = PREDEFINED_TAGS.find((t) => t.id === tag.toLowerCase());
+  if (found) return found.label;
+  return tag.charAt(0).toUpperCase() + tag.slice(1);
+}
+
 function makeId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -141,14 +158,44 @@ export function domainOf(url: string): string {
   }
 }
 
+function cleanTagList(tags: string[]): string[] {
+  return Array.from(
+    new Set(
+      tags
+        .map((t) => t.replace(/^#+/, "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  ).slice(0, 12);
+}
+
 /** Returns the stored entry and whether it was newly created (dedupes by URL). */
 export function addArticle(
-  rawUrl: string
+  rawInput: string,
+  initialTags: string[] = []
 ): { article: SavedArticle; added: boolean } {
-  const url = normalizeUrl(rawUrl);
+  // Support inline "#tag" tokens after the URL (e.g. "https://example.com #tech #ai").
+  const inlineTags: string[] = [];
+  const strippedUrl = rawInput
+    .trim()
+    .replace(/(?:^|\s)#([a-z0-9_-]+)/gi, (_m, tag: string) => {
+      inlineTags.push(tag);
+      return "";
+    })
+    .trim();
+
+  const url = normalizeUrl(strippedUrl || rawInput.trim());
+  const mergedTags = cleanTagList([...initialTags, ...inlineTags]);
   const list = loadRawArticles();
   const existing = list.find((a) => a.url === url && !a.removedAt);
-  if (existing) return { article: existing, added: false };
+  if (existing) {
+    if (mergedTags.length > 0) {
+      const nextTags = cleanTagList([...(existing.tags ?? []), ...mergedTags]);
+      const updated = { ...existing, tags: nextTags, updatedAt: Date.now() };
+      persist(list.map((a) => (a.id === existing.id ? updated : a)));
+      return { article: updated, added: false };
+    }
+    return { article: existing, added: false };
+  }
 
   const timestamp = Date.now();
   const article: SavedArticle = {
@@ -158,6 +205,7 @@ export function addArticle(
     domain: domainOf(url),
     addedAt: timestamp,
     readAt: null,
+    tags: mergedTags,
     contentStatus: "pending",
     progress: 0,
     updatedAt: timestamp,
@@ -230,13 +278,28 @@ export function setArticleArchived(id: string, archived: boolean): void {
 /** Replaces an article's tag list (lowercased, deduped, non-empty). */
 export function setArticleTags(id: string, tags: string[]): void {
   const now = Date.now();
-  const clean = Array.from(
-    new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))
-  ).slice(0, 10);
+  const clean = cleanTagList(tags);
   persist(
     loadRawArticles().map((a) =>
       a.id === id ? { ...a, tags: clean, updatedAt: now } : a
     )
+  );
+}
+
+/** Toggles a single tag on/off an article. */
+export function toggleArticleTag(id: string, rawTag: string): void {
+  const tag = rawTag.replace(/^#+/, "").trim().toLowerCase();
+  if (!tag) return;
+  const now = Date.now();
+  persist(
+    loadRawArticles().map((a) => {
+      if (a.id !== id) return a;
+      const current = a.tags ?? [];
+      const next = current.includes(tag)
+        ? current.filter((t) => t !== tag)
+        : cleanTagList([...current, tag]);
+      return { ...a, tags: next, updatedAt: now };
+    })
   );
 }
 

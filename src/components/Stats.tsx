@@ -146,7 +146,11 @@ export default function Stats({ theme, onCycleTheme }: Props) {
         <div className="topbar-actions">
           <button className="secondary-action" onClick={() => navigate("#/")}>
             <ArrowLeft size={15} />
-            Library
+            Articles
+          </button>
+          <button className="secondary-action" onClick={() => navigate("#/books")}>
+            <BookOpen size={15} />
+            Bookshelf
           </button>
         </div>
         <div className="reader-title">

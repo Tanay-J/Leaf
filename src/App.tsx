@@ -53,10 +53,14 @@ export default function App() {
     if (parsed.path !== "#/add") return;
     const rawUrl = parsed.query.get("url") ?? "";
     const rawText = parsed.query.get("text") ?? "";
+    const rawTags = parsed.query.get("tags") ?? "";
+    const initialTags = rawTags
+      ? rawTags.split(",").map((t) => t.trim()).filter(Boolean)
+      : [];
     const candidate =
       rawUrl || (/https?:\/\/\S+/i.exec(rawText)?.[0] ?? rawText);
     try {
-      const { article } = addArticle(candidate.trim());
+      const { article } = addArticle(candidate.trim(), initialTags);
       void extractAndSyncArticle(article);
       navigate(`#/article/${article.id}`);
     } catch {
@@ -110,14 +114,14 @@ export default function App() {
 
   if (parsed.path === "#/add") return null; // redirecting via the effect above
 
-  if (parsed.path === "#/articles") {
-    return (
-      <ArticlesList
-        {...shared}
-        initialError={parsed.query.get("error") === "invalid"}
-      />
-    );
+  if (parsed.path === "#/books" || parsed.path === "#/library") {
+    return <Library {...shared} />;
   }
 
-  return <Library {...shared} />;
+  return (
+    <ArticlesList
+      {...shared}
+      initialError={parsed.query.get("error") === "invalid"}
+    />
+  );
 }

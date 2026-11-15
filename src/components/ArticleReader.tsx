@@ -1,18 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
+  Check,
   ExternalLink,
   Loader2,
+  Maximize2,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   RefreshCw,
+  Tag,
+  X,
 } from "lucide-react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import {
+  ARTICLES_CHANGED_EVENT,
+  PREDEFINED_TAGS,
+  formatTagLabel,
+  getArticle,
   parseReaderResponse,
   setArticleProgress,
   setArticleRead,
+  setArticleTags,
+  toggleArticleTag,
   updateArticleExtracted,
   type SavedArticle,
 } from "../articles";
@@ -40,11 +52,21 @@ interface Props {
   embedded?: boolean;
   listMinimized?: boolean;
   onToggleList?: () => void;
+  onSelectTag?: (tag: string) => void;
 }
 
 const FONT_KEY = "article-font";
 const FONT_FAMILY_KEY = "article-font-family";
 const SPACING_KEY = "article-line-height";
+const WIDE_KEY = "article-wide";
+
+function loadWide(): boolean {
+  try {
+    return localStorage.getItem(WIDE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function loadFont(): number {
   try {
@@ -87,6 +109,7 @@ export default function ArticleReader({
   embedded,
   listMinimized,
   onToggleList,
+  onSelectTag,
 }: Props) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [html, setHtml] = useState("");
@@ -95,6 +118,49 @@ export default function ArticleReader({
   const [font, setFont] = useState<number>(loadFont);
   const [fontFamily, setFontFamily] = useState<string>(loadFontFamily);
   const [spacingId, setSpacingId] = useState<string>(loadSpacingId);
+  const [wide, setWide] = useState<boolean>(loadWide);
+  const [scrollPct, setScrollPct] = useState<number>(() => article.progress ?? 0);
+  const [tags, setTags] = useState<string[]>(() => article.tags ?? []);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [customTag, setCustomTag] = useState("");
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setTags(article.tags ?? []);
+    setScrollPct(article.progress ?? 0);
+  }, [article.id, article.tags, article.progress]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    const onArticles = () => {
+      const fresh = getArticle(article.id);
+      if (fresh) setTags(fresh.tags ?? []);
+    };
+    window.addEventListener(ARTICLES_CHANGED_EVENT, onArticles);
+    return () => window.removeEventListener(ARTICLES_CHANGED_EVENT, onArticles);
+  }, [article.id]);
+
+  const handleToggleTag = (tagId: string) => {
+    toggleArticleTag(article.id, tagId);
+  };
+
+  const handleAddCustomTag = (e: FormEvent) => {
+    e.preventDefault();
+    const cleaned = customTag.replace(/^#+/, "").trim().toLowerCase();
+    if (!cleaned) return;
+    setArticleTags(article.id, [...tags, cleaned]);
+    setCustomTag("");
+  };
 
   useEffect(() => {
     const onSettings = () => {
@@ -199,11 +265,12 @@ export default function ArticleReader({
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onScroll = () => {
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (maxScroll <= 0) return;
+      const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll));
+      setScrollPct(pct);
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
-        if (maxScroll <= 0) return;
-        const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll));
         setArticleProgress(article.id, pct);
       }, 400);
     };
@@ -247,25 +314,37 @@ export default function ArticleReader({
     notifySettingsChanged();
   }
 
+  function toggleWide(): void {
+    setWide((w) => {
+      const next = !w;
+      try {
+        localStorage.setItem(WIDE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
+
   const title = fetchedTitle ?? article.title;
 
   return (
     <div className={`article-reader${embedded ? " embedded-article-reader" : ""}`}>
-      <header className="topbar reader-topbar">
+      <header className="topbar reader-topbar article-reader-topbar">
         <div className="topbar-actions">
           {embedded && onToggleList ? (
             <button
               type="button"
               className="secondary-action"
               onClick={onToggleList}
-              title={listMinimized ? "Show reading list" : "Minimize reading list"}
+              title={listMinimized ? "Show reading list" : "Expand reading area"}
             >
               {listMinimized ? (
                 <PanelLeftOpen size={15} />
               ) : (
                 <PanelLeftClose size={15} />
               )}
-              {listMinimized ? "Show List" : "Minimize List"}
+              {listMinimized ? "Show List" : "Focus"}
             </button>
           ) : (
             <button className="secondary-action" onClick={() => navigate("#/articles")}>
@@ -282,6 +361,70 @@ export default function ArticleReader({
           </span>
         </div>
         <div className="topbar-actions">
+          <div className="reader-tag-menu-wrap" ref={pickerRef}>
+            <button
+              type="button"
+              className={`icon-btn reader-tag-btn${tags.length > 0 || pickerOpen ? " active" : ""}`}
+              onClick={() => setPickerOpen((o) => !o)}
+              title="Tag article"
+              aria-label="Tag article"
+            >
+              <Tag size={14} />
+              {tags.length > 0 && <span className="reader-tag-count">{tags.length}</span>}
+            </button>
+            {pickerOpen && (
+              <div className="reader-tag-dropdown" role="dialog" aria-label="Article tags">
+                <div className="reader-tag-dropdown-head">
+                  <strong>Tags</strong>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => setPickerOpen(false)}
+                    aria-label="Close tags menu"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="tag-picker-presets">
+                  {PREDEFINED_TAGS.map((preset) => {
+                    const active = tags.includes(preset.id);
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`preset-tag-chip${active ? " active" : ""}`}
+                        onClick={() => handleToggleTag(preset.id)}
+                      >
+                        {active ? <Check size={10} /> : <Plus size={10} />}
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <form className="tag-picker-custom" onSubmit={handleAddCustomTag}>
+                  <input
+                    type="text"
+                    value={customTag}
+                    onChange={(e) => setCustomTag(e.target.value)}
+                    placeholder="Custom tag…"
+                    aria-label="Add custom tag"
+                  />
+                  <button type="submit" className="mini-btn" disabled={!customTag.trim()}>
+                    Add
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className={`icon-btn${wide ? " active" : ""}`}
+            onClick={toggleWide}
+            title={wide ? "Standard reading width" : "Wide reading width"}
+            aria-label="Toggle reading width"
+          >
+            {wide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
           <button
             type="button"
             className="icon-btn"
@@ -310,6 +453,11 @@ export default function ArticleReader({
           />
           {!embedded && <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />}
         </div>
+        {scrollPct > 0.01 && (
+          <div className="reader-progress" aria-hidden>
+            <span style={{ width: `${Math.round(scrollPct * 100)}%` }} />
+          </div>
+        )}
       </header>
 
       <main className="article-body">
@@ -342,21 +490,46 @@ export default function ArticleReader({
         )}
         {status === "ready" && (
           <div className="article-scroll" ref={scrollRef}>
-            <div
-              className="article-prose"
-              style={{
-                fontSize: `${font}%`,
-                fontFamily: fontStackFor(fontFamily),
-                lineHeight: spacingValueFor(spacingId) ?? ARTICLE_DEFAULT_LINE_HEIGHT,
-              }}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
-            <p className="article-source">
-              Source:{" "}
-              <a href={article.url} target="_blank" rel="noopener noreferrer">
-                {article.domain || article.url}
-              </a>
-            </p>
+            <article className={`article-sheet${wide ? " wide" : ""}`}>
+              {tags.length > 0 && (
+                <div className="article-sheet-tags">
+                  {tags.map((t) => (
+                    <span key={t} className="article-tag reader-tag-pill">
+                      <button
+                        type="button"
+                        className="reader-tag-pill-label"
+                        onClick={() => onSelectTag?.(t)}
+                      >
+                        #{formatTagLabel(t)}
+                      </button>
+                      <button
+                        type="button"
+                        className="reader-tag-pill-remove"
+                        onClick={() => handleToggleTag(t)}
+                        aria-label={`Remove ${t}`}
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div
+                className="article-prose"
+                style={{
+                  fontSize: `${font}%`,
+                  fontFamily: fontStackFor(fontFamily),
+                  lineHeight: spacingValueFor(spacingId) ?? ARTICLE_DEFAULT_LINE_HEIGHT,
+                }}
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+              <p className="article-source">
+                Source:{" "}
+                <a href={article.url} target="_blank" rel="noopener noreferrer">
+                  {article.domain || article.url}
+                </a>
+              </p>
+            </article>
           </div>
         )}
       </main>

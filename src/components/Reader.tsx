@@ -127,7 +127,7 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
           <button
             type="button"
             className="secondary-action studio-back-btn"
-            onClick={() => navigate("#/")}
+            onClick={() => navigate("#/books")}
           >
             <ArrowLeft size={15} />
             Back to Shelf
@@ -151,7 +151,7 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
               <button
                 type="button"
                 className="secondary-action"
-                onClick={() => navigate("#/")}
+                onClick={() => navigate("#/books")}
                 title="Back to Shelf"
               >
                 <ArrowLeft size={15} />

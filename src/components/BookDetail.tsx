@@ -183,7 +183,7 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
     <div className="library">
       <header className="topbar">
         <div className="topbar-actions">
-          <button className="secondary-action" onClick={() => navigate("#/")}>
+          <button className="secondary-action" onClick={() => navigate("#/books")}>
             <ArrowLeft size={15} />
             Library
           </button>
@@ -313,7 +313,7 @@ export default function BookDetail({ book, theme, onCycleTheme }: Props) {
                   className="card-remove"
                   onClick={() => {
                     removeUserBook(book.id);
-                    navigate("#/");
+                    navigate("#/books");
                   }}
                   title="Remove from your library"
                   aria-label={`Remove ${book.title}`}

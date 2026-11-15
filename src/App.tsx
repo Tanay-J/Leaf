@@ -5,7 +5,7 @@ import Reader from "./components/Reader";
 import ArticlesList from "./components/ArticlesList";
 import ArticleReader from "./components/ArticleReader";
 import { addArticle, getArticle } from "./articles";
-import { initSync } from "./articleSync";
+import { extractAndSyncArticle, initSync } from "./articleSync";
 import { initStateSync } from "./stateSync";
 import { findBook, USER_BOOKS_CHANGED_EVENT } from "./userBooks";
 import { loadCatalog } from "./books";
@@ -47,12 +47,17 @@ export default function App() {
   }, [route]);
 
   /* The "#/add?url=…" route is the entry point used by the "Save to Leaf"
-     bookmarklet: it saves the passed URL and jumps straight to reading. */
+     bookmarklet and PWA Web Share Target: it saves the passed URL, starts
+     background extraction + vault sync, and jumps straight to reading. */
   useEffect(() => {
     if (parsed.path !== "#/add") return;
-    const raw = parsed.query.get("url") ?? "";
+    const rawUrl = parsed.query.get("url") ?? "";
+    const rawText = parsed.query.get("text") ?? "";
+    const candidate =
+      rawUrl || (/https?:\/\/\S+/i.exec(rawText)?.[0] ?? rawText);
     try {
-      const { article } = addArticle(raw);
+      const { article } = addArticle(candidate.trim());
+      void extractAndSyncArticle(article);
       navigate(`#/article/${article.id}`);
     } catch {
       navigate("#/articles?error=invalid");

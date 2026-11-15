@@ -376,12 +376,20 @@ export default function EpubReader({
   }, [status]);
 
   useEffect(() => {
+    const prev = loadProgress(book.id);
+    const nextLh = spacingValueFor(spacingId);
+    const changed =
+      prev.fontSize !== fontSize ||
+      (prev.fontFamily ?? "") !== fontFamily ||
+      prev.lineHeight !== nextLh ||
+      (prev.layout ?? "single") !== layout;
     saveProgress(book.id, {
-      ...loadProgress(book.id),
+      ...prev,
       fontSize,
       fontFamily,
-      lineHeight: spacingValueFor(spacingId),
+      lineHeight: nextLh,
       layout,
+      ...(changed ? { updatedAt: Date.now() } : {}),
     });
   }, [fontSize, fontFamily, spacingId, layout, book.id]);
 

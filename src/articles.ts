@@ -18,6 +18,14 @@ export interface SavedArticle {
   archivedAt?: number | null;
   /** User tags, lowercase and trimmed. */
   tags?: string[];
+  /** Short plain-text excerpt from extracted markdown. */
+  excerpt?: string;
+  /** Estimated reading time in minutes (~220 wpm). */
+  readingMinutes?: number;
+  /** Extraction / offline content status. */
+  contentStatus?: "pending" | "ready" | "failed";
+  /** Scroll reading progress 0..1. */
+  progress?: number;
   /** Last time any field changed; drives sync merge conflicts. */
   updatedAt: number;
   /** Tombstone for cross-device deletes; null while the row is live. */
@@ -150,6 +158,8 @@ export function addArticle(
     domain: domainOf(url),
     addedAt: timestamp,
     readAt: null,
+    contentStatus: "pending",
+    progress: 0,
     updatedAt: timestamp,
     removedAt: null,
   };
@@ -230,6 +240,34 @@ export function setArticleTags(id: string, tags: string[]): void {
   );
 }
 
+/**
+ * Splits a Jina Reader (r.jina.ai) text response into its metadata header
+ * and the markdown body. Jina prefixes the body with lines like
+ *   Title: …\n\nURL Source: …\n\nPublished Time: …\n\nMarkdown Content:\n
+ * which must not be rendered as part of the article. Responses without that
+ * header (and older cached copies) are returned unchanged.
+ */
+export function parseReaderResponse(raw: string): {
+  title: string | null;
+  markdown: string;
+} {
+  const text = raw.replace(/\r\n?/g, "\n");
+  const marker = /^Markdown Content:[ \t]*\n?/m.exec(text);
+  const head = marker ? text.slice(0, marker.index) : "";
+  const looksLikeHeader = marker != null && /^(Title|URL Source):/m.test(head);
+  const markdown = looksLikeHeader
+    ? text.slice(marker.index + marker[0].length).trim()
+    : text.trim();
+  const headerTitle = looksLikeHeader
+    ? /^Title:[ \t]*(.+)$/m.exec(head)?.[1]?.trim()
+    : undefined;
+  const headingTitle = /^#\s+(.+)$/m
+    .exec(markdown.slice(0, 4000))?.[1]
+    ?.replace(/[#*_`]+/g, "")
+    .trim();
+  return { title: headerTitle || headingTitle || null, markdown };
+}
+
 /** Upgrades the placeholder title with the real one pulled from the page. */
 export function updateArticleTitle(id: string, title: string): void {
   const clean = title.trim();
@@ -238,6 +276,78 @@ export function updateArticleTitle(id: string, title: string): void {
   persist(
     loadRawArticles().map((a) =>
       a.id === id ? { ...a, title: clean, updatedAt: now } : a
+    )
+  );
+}
+
+/** Derives a short plain-text excerpt and reading time from markdown. */
+function summarizeMarkdown(md: string): {
+  excerpt: string;
+  readingMinutes: number;
+} {
+  const plain = md
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^#{1,6}\s+.*$/gm, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`>#~|-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = plain ? plain.split(/\s+/).length : 0;
+  const readingMinutes = Math.max(1, Math.round(words / 220));
+  const excerpt = plain.length > 160 ? `${plain.slice(0, 157)}…` : plain;
+  return { excerpt, readingMinutes };
+}
+
+/** Records extracted title, excerpt, reading time, and ready status. */
+export function updateArticleExtracted(
+  id: string,
+  info: { title?: string | null; markdown: string }
+): void {
+  const now = Date.now();
+  const { excerpt, readingMinutes } = summarizeMarkdown(info.markdown);
+  const cleanTitle = info.title?.trim();
+  persist(
+    loadRawArticles().map((a) =>
+      a.id === id
+        ? {
+            ...a,
+            ...(cleanTitle ? { title: cleanTitle } : {}),
+            excerpt,
+            readingMinutes,
+            contentStatus: "ready" as const,
+            updatedAt: now,
+          }
+        : a
+    )
+  );
+}
+
+export function setArticleContentStatus(
+  id: string,
+  contentStatus: "pending" | "ready" | "failed"
+): void {
+  const now = Date.now();
+  persist(
+    loadRawArticles().map((a) =>
+      a.id === id ? { ...a, contentStatus, updatedAt: now } : a
+    )
+  );
+}
+
+export function setArticleProgress(id: string, progress: number): void {
+  const clamped = Math.max(0, Math.min(1, progress));
+  const now = Date.now();
+  persist(
+    loadRawArticles().map((a) =>
+      a.id === id
+        ? {
+            ...a,
+            progress: clamped,
+            ...(clamped >= 0.9 ? { readAt: a.readAt ?? now } : {}),
+            updatedAt: now,
+          }
+        : a
     )
   );
 }

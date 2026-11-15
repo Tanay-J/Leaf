@@ -89,10 +89,11 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
           type="button"
           className="zen-exit-btn"
           onClick={() => setZenMode(false)}
-          title="Exit focus mode (Z or Esc)"
-          aria-label="Exit focus mode"
+          title="Exit full size (Z or Esc)"
+          aria-label="Exit full size"
         >
           <Minimize2 size={14} />
+          <span style={{ fontSize: 12, marginLeft: 6 }}>Exit Full Size (Esc)</span>
         </button>
       )}
 
@@ -185,8 +186,8 @@ export default function Reader({ book, theme, onCycleTheme }: Props) {
             <button
               className="icon-btn"
               onClick={() => setZenMode(true)}
-              title="Focus mode (Z)"
-              aria-label="Focus mode"
+              title="Full size reader (Z or Esc to exit)"
+              aria-label="Full size reader"
             >
               <Maximize2 size={15} />
             </button>

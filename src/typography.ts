@@ -12,27 +12,46 @@ export interface FontOption {
 }
 
 export const FONT_OPTIONS: FontOption[] = [
-  { id: "", label: "Default font" },
+  { id: "", label: "Book's default font" },
+  {
+    id: "lora",
+    label: "Lora (Classic Serif)",
+    stack: "'Lora', Georgia, serif",
+  },
+  {
+    id: "cormorant",
+    label: "Cormorant Garamond",
+    stack: "'Cormorant Garamond', Garamond, Georgia, serif",
+  },
   {
     id: "literata",
-    label: "Literata (book)",
+    label: "Literata (Book)",
     stack: "'Literata', Georgia, serif",
   },
   {
+    id: "newsreader",
+    label: "Newsreader (Editorial)",
+    stack: "'Newsreader', Georgia, serif",
+  },
+  {
+    id: "eb-garamond",
+    label: "EB Garamond",
+    stack: "'EB Garamond', Garamond, Georgia, serif",
+  },
+  {
+    id: "libre-baskerville",
+    label: "Libre Baskerville",
+    stack: "'Libre Baskerville', Baskerville, Georgia, serif",
+  },
+  {
     id: "serif",
-    label: "Serif — Georgia",
+    label: "Georgia",
     stack: "Georgia, 'Times New Roman', serif",
   },
   {
     id: "book",
-    label: "Book — Palatino",
+    label: "Palatino",
     stack: "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
-  },
-  {
-    id: "baskerville",
-    label: "Baskerville",
-    stack:
-      "Baskerville, 'Baskerville Old Face', 'Hoefler Text', Garamond, 'Times New Roman', serif",
   },
   {
     id: "charter",
@@ -40,15 +59,15 @@ export const FONT_OPTIONS: FontOption[] = [
     stack: "Charter, 'Bitstream Charter', 'Sitka Text', Cambria, serif",
   },
   {
+    id: "jakarta",
+    label: "Sans — Plus Jakarta",
+    stack: "'Plus Jakarta Sans', system-ui, sans-serif",
+  },
+  {
     id: "sans",
     label: "Sans — System",
     stack:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif",
-  },
-  {
-    id: "jakarta",
-    label: "Sans — Jakarta",
-    stack: "'Plus Jakarta Sans', system-ui, sans-serif",
   },
 ];
 

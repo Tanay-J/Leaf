@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  Activity,
   Bookmark,
   BookOpen,
   Check,
@@ -22,6 +23,7 @@ import {
   Link,
   List,
   Loader2,
+  Newspaper,
   Pencil,
   Play,
   Plus,
@@ -756,6 +758,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
               className={`studio-nav-btn${tab === "mine" ? " active" : ""}`}
               onClick={() => setTab("mine")}
             >
+              <BookOpen size={15} />
               <span>My Shelf</span>
               <span className="studio-nav-count">{books.length}</span>
             </button>
@@ -764,6 +767,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
               className={`studio-nav-btn${tab === "browse" ? " active" : ""}`}
               onClick={() => setTab("browse")}
             >
+              <Compass size={15} />
               <span>Browse Vault</span>
               <span className="studio-nav-count">{catalog.length}</span>
             </button>
@@ -772,6 +776,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
               className="studio-nav-btn"
               onClick={() => navigate("#/articles")}
             >
+              <Newspaper size={15} />
               <span>Reading List</span>
               {unreadArticles > 0 && (
                 <span className="studio-nav-count accent">{unreadArticles}</span>
@@ -782,9 +787,10 @@ export default function Library({ theme, onCycleTheme }: Props) {
               className="studio-nav-btn"
               onClick={() => navigate("#/stats")}
             >
+              <Activity size={15} />
               <span>Activity & Stats</span>
               {stats.streak > 0 && (
-                <span className="studio-nav-count">{stats.streak}d</span>
+                <span className="studio-nav-count">🔥 {stats.streak}d</span>
               )}
             </button>
           </div>
@@ -799,6 +805,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
                   className={`studio-nav-btn${statusFilter === f ? " active" : ""}`}
                   onClick={() => setStatusFilter(f)}
                 >
+                  <span className={`studio-dot dot-${f}`} />
                   <span>
                     {f === "all"
                       ? "All Books"

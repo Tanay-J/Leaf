@@ -18,6 +18,22 @@ export function navigate(hash: string): void {
   window.location.hash = hash;
 }
 
+/* ---------- global settings persistence & sync ---------- */
+
+export const SETTINGS_CHANGED_EVENT = "leaf:settings-changed";
+export const SETTINGS_UPDATED_AT_KEY = "leaf:settings-updated-at";
+
+export function notifySettingsChanged(): void {
+  try {
+    localStorage.setItem(SETTINGS_UPDATED_AT_KEY, String(Date.now()));
+  } catch {
+    /* private mode */
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
+  }
+}
+
 /* ---------- theme (light / sepia / dark) ---------- */
 
 export type Theme = "light" | "sepia" | "dark";
@@ -50,12 +66,26 @@ export function useTheme() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    const onSettings = () => setTheme(readStoredTheme());
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+  }, []);
+
   return {
     theme,
-    cycleTheme: () =>
-      setTheme(
-        (t) => THEME_CYCLE[(THEME_CYCLE.indexOf(t) + 1) % THEME_CYCLE.length]
-      ),
+    cycleTheme: () => {
+      setTheme((t) => {
+        const next = THEME_CYCLE[(THEME_CYCLE.indexOf(t) + 1) % THEME_CYCLE.length];
+        try {
+          localStorage.setItem("reader-theme", next);
+        } catch {
+          /* private mode */
+        }
+        return next;
+      });
+      notifySettingsChanged();
+    },
   };
 }
 
@@ -63,16 +93,18 @@ export function useTheme() {
 
 const sidebarKey = "reader-sidebar-open";
 
+function readSidebarOpen(): boolean {
+  try {
+    const stored = localStorage.getItem(sidebarKey);
+    if (stored !== null) return stored === "1";
+  } catch {
+    /* private mode */
+  }
+  return typeof window === "undefined" || window.innerWidth > 720;
+}
+
 export function useSidebarOpen() {
-  const [open, setOpen] = useState<boolean>(() => {
-    try {
-      const stored = localStorage.getItem(sidebarKey);
-      if (stored !== null) return stored === "1";
-    } catch {
-      /* private mode */
-    }
-    return typeof window === "undefined" || window.innerWidth > 720;
-  });
+  const [open, setOpen] = useState<boolean>(readSidebarOpen);
 
   useEffect(() => {
     try {
@@ -82,21 +114,43 @@ export function useSidebarOpen() {
     }
   }, [open]);
 
-  return { sidebarOpen: open, toggleSidebar: () => setOpen((o) => !o) };
+  useEffect(() => {
+    const onSettings = () => setOpen(readSidebarOpen());
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+  }, []);
+
+  return {
+    sidebarOpen: open,
+    toggleSidebar: () => {
+      setOpen((o) => {
+        const next = !o;
+        try {
+          localStorage.setItem(sidebarKey, next ? "1" : "0");
+        } catch {
+          /* storage unavailable */
+        }
+        return next;
+      });
+      notifySettingsChanged();
+    },
+  };
 }
 
 /* ---------- library view mode (grid / list) ---------- */
 
 export type LibraryView = "grid" | "list";
 
+function readLibraryView(): LibraryView {
+  try {
+    return localStorage.getItem("library-view") === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
 export function useLibraryView() {
-  const [view, setView] = useState<LibraryView>(() => {
-    try {
-      return localStorage.getItem("library-view") === "list" ? "list" : "grid";
-    } catch {
-      return "grid";
-    }
-  });
+  const [view, setViewState] = useState<LibraryView>(readLibraryView);
 
   useEffect(() => {
     try {
@@ -105,6 +159,22 @@ export function useLibraryView() {
       /* storage unavailable */
     }
   }, [view]);
+
+  useEffect(() => {
+    const onSettings = () => setViewState(readLibraryView());
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+  }, []);
+
+  const setView = (next: LibraryView) => {
+    try {
+      localStorage.setItem("library-view", next);
+    } catch {
+      /* storage unavailable */
+    }
+    setViewState(next);
+    notifySettingsChanged();
+  };
 
   return { view, setView };
 }

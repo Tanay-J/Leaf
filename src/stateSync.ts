@@ -19,6 +19,8 @@
  */
 import {
   PROGRESS_SAVED_EVENT,
+  SETTINGS_CHANGED_EVENT,
+  SETTINGS_UPDATED_AT_KEY,
   bookSecondsMap,
   loadAllProgress,
   readDays,
@@ -92,6 +94,16 @@ interface ProgressRecord extends BookProgress {
   finishedAt?: number | null;
 }
 
+interface SettingsRecord {
+  theme?: string;
+  libraryView?: string;
+  sidebarOpen?: boolean;
+  articleFont?: number;
+  articleFontFamily?: string;
+  articleLineHeight?: string;
+  updatedAt: number;
+}
+
 interface StatePayload {
   schema: number;
   progress: Record<string, ProgressRecord>;
@@ -101,6 +113,8 @@ interface StatePayload {
   readSeconds: Record<string, number>;
   /** Cumulative seconds read per book (bookId → seconds). */
   bookSeconds?: Record<string, number>;
+  /** Global app and article-reader preferences (last-writer-wins). */
+  settings?: SettingsRecord;
 }
 
 let status: StateSyncStatus = isVaultConnected()
@@ -192,6 +206,57 @@ function buildLocalPins(): Record<string, PinRecord> {
   return out;
 }
 
+function buildLocalSettings(): SettingsRecord {
+  const rec: SettingsRecord = { updatedAt: 0 };
+  try {
+    const updatedAt = Number(localStorage.getItem(SETTINGS_UPDATED_AT_KEY) ?? "0");
+    if (Number.isFinite(updatedAt) && updatedAt > 0) rec.updatedAt = updatedAt;
+    const theme = localStorage.getItem("reader-theme");
+    if (theme) rec.theme = theme;
+    const libraryView = localStorage.getItem("library-view");
+    if (libraryView) rec.libraryView = libraryView;
+    const sidebarOpen = localStorage.getItem("reader-sidebar-open");
+    if (sidebarOpen !== null) rec.sidebarOpen = sidebarOpen === "1";
+    const articleFont = Number(localStorage.getItem("article-font"));
+    if (Number.isFinite(articleFont) && articleFont >= 70 && articleFont <= 200) {
+      rec.articleFont = articleFont;
+    }
+    const articleFontFamily = localStorage.getItem("article-font-family");
+    if (articleFontFamily !== null) rec.articleFontFamily = articleFontFamily;
+    const articleLineHeight = localStorage.getItem("article-line-height");
+    if (articleLineHeight) rec.articleLineHeight = articleLineHeight;
+  } catch {
+    /* private mode */
+  }
+  return rec;
+}
+
+function applyLocalSettings(remote: SettingsRecord | undefined): void {
+  if (!remote) return;
+  try {
+    const localUpdatedAt = Number(localStorage.getItem(SETTINGS_UPDATED_AT_KEY) ?? "0") || 0;
+    if ((remote.updatedAt ?? 0) <= localUpdatedAt) return;
+    if (remote.theme) localStorage.setItem("reader-theme", remote.theme);
+    if (remote.libraryView) localStorage.setItem("library-view", remote.libraryView);
+    if (remote.sidebarOpen !== undefined) {
+      localStorage.setItem("reader-sidebar-open", remote.sidebarOpen ? "1" : "0");
+    }
+    if (remote.articleFont !== undefined) {
+      localStorage.setItem("article-font", String(remote.articleFont));
+    }
+    if (remote.articleFontFamily !== undefined) {
+      localStorage.setItem("article-font-family", remote.articleFontFamily);
+    }
+    if (remote.articleLineHeight) {
+      localStorage.setItem("article-line-height", remote.articleLineHeight);
+    }
+    localStorage.setItem(SETTINGS_UPDATED_AT_KEY, String(remote.updatedAt));
+    window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
+  } catch {
+    /* private mode */
+  }
+}
+
 /** Serializes local state; union-merges the remote readDays so pushes never
  *  erase days recorded by other devices. */
 function buildPayload(remote?: StatePayload | null): string {
@@ -217,6 +282,7 @@ function buildPayload(remote?: StatePayload | null): string {
     // Max per day / per book: another device's tally never lowers ours.
     readSeconds: maxMergeNumbers(remote?.readSeconds, readSecondsMap()),
     bookSeconds: maxMergeNumbers(remote?.bookSeconds, bookSecondsMap()),
+    settings: buildLocalSettings(),
   };
   return JSON.stringify(payload);
 }
@@ -334,6 +400,8 @@ function mergePins(
 }
 
 function mergeState(local: StatePayload, remote: StatePayload): StatePayload {
+  const localSettingsAt = local.settings?.updatedAt ?? 0;
+  const remoteSettingsAt = remote.settings?.updatedAt ?? 0;
   return {
     schema: SCHEMA,
     progress: mergeProgress(local.progress, remote.progress),
@@ -341,6 +409,10 @@ function mergeState(local: StatePayload, remote: StatePayload): StatePayload {
     readDays: { ...remote.readDays, ...local.readDays },
     readSeconds: maxMergeNumbers(remote.readSeconds, local.readSeconds),
     bookSeconds: maxMergeNumbers(remote.bookSeconds, local.bookSeconds ?? {}),
+    settings:
+      remoteSettingsAt > localSettingsAt
+        ? remote.settings
+        : local.settings ?? remote.settings,
   };
 }
 
@@ -375,6 +447,7 @@ function applyState(merged: StatePayload): void {
     replaceReadDays(merged.readDays);
     replaceReadSeconds(merged.readSeconds);
     if (merged.bookSeconds) replaceBookSeconds(merged.bookSeconds);
+    applyLocalSettings(merged.settings);
   } finally {
     applyingRemote = false;
   }
@@ -537,6 +610,7 @@ export function initStateSync(): void {
   initialized = true;
   window.addEventListener(PROGRESS_SAVED_EVENT, onStateChanged);
   window.addEventListener(USER_BOOKS_CHANGED_EVENT, onStateChanged);
+  window.addEventListener(SETTINGS_CHANGED_EVENT, onStateChanged);
   // A pin whose book wasn't known yet (fresh device, catalog still loading)
   // resolves the moment books/catalog.json arrives.
   window.addEventListener(CATALOG_LOADED_EVENT, () => {

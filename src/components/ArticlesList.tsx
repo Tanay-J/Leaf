@@ -2,9 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   Archive,
   ArchiveRestore,
-  BookOpen,
   Link2,
-  Loader2,
   Newspaper,
   Plus,
   RefreshCw,
@@ -15,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  ARTICLES_CHANGED_EVENT,
   addArticle,
   loadArticles,
   removeArticle,
@@ -24,6 +23,7 @@ import {
   type SavedArticle,
 } from "../articles";
 import {
+  extractAndSyncArticle,
   getSyncStatus,
   syncConnect,
   syncConnectViaVault,
@@ -33,6 +33,7 @@ import {
 } from "../articleSync";
 import { isVaultConnected } from "../vaultSync";
 import { navigate, type Theme } from "../lib";
+import ArticleReader from "./ArticleReader";
 import ThemeButton from "./ThemeButton";
 
 interface Props {
@@ -67,6 +68,13 @@ export default function ArticlesList({
     initialError ? "That doesn’t look like a valid link." : ""
   );
 
+  /* Split-pane selection and feed visibility. */
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const first = loadArticles().find((a) => !a.archivedAt);
+    return first?.id ?? null;
+  });
+  const [listMinimized, setListMinimized] = useState(false);
+
   /* List organization: filter chips + tag focus + inline tag editing. */
   const [filter, setFilter] = useState<"all" | "unread" | "starred" | "archived">(
     "all"
@@ -88,6 +96,9 @@ export default function ArticlesList({
     new Set(articles.flatMap((a) => a.tags ?? []))
   ).sort();
 
+  const selectedArticle =
+    articles.find((a) => a.id === selectedId) ?? visible[0] ?? null;
+
   const commitTags = (a: SavedArticle) => {
     if (tagEditId === a.id) setArticleTags(a.id, tagDraft.split(","));
     setTagEditId(null);
@@ -95,10 +106,8 @@ export default function ArticlesList({
     setArticles(loadArticles());
   };
 
-  /* Cross-device sync UI state. */
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() =>
-    getSyncStatus()
-  );
+  /* Sync panel state: mirrors getSyncStatus() via the window event. */
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() => getSyncStatus());
   const [token, setToken] = useState("");
   const [syncBusy, setSyncBusy] = useState(false);
   const [connectError, setConnectError] = useState("");
@@ -106,8 +115,13 @@ export default function ArticlesList({
   useEffect(() => {
     const onStatus = (e: Event) =>
       setSyncStatus({ ...(e as CustomEvent<SyncStatus>).detail });
+    const onArticles = () => setArticles(loadArticles());
     window.addEventListener("leaf:sync-status", onStatus);
-    return () => window.removeEventListener("leaf:sync-status", onStatus);
+    window.addEventListener(ARTICLES_CHANGED_EVENT, onArticles);
+    return () => {
+      window.removeEventListener("leaf:sync-status", onStatus);
+      window.removeEventListener(ARTICLES_CHANGED_EVENT, onArticles);
+    };
   }, []);
 
   const connect = async () => {
@@ -151,12 +165,12 @@ export default function ArticlesList({
     e.preventDefault();
     if (!url.trim()) return;
     try {
-      const { article } = addArticle(url.trim());
+      const { article, added } = addArticle(url.trim());
       setUrl("");
       setError("");
-      // Refresh so a duplicate stays put and a fresh save appears at the top.
       setArticles(loadArticles());
-      navigate(`#/article/${article.id}`);
+      setSelectedId(article.id);
+      if (added) void extractAndSyncArticle(article);
     } catch {
       setError("That doesn’t look like a valid link.");
     }
@@ -164,8 +178,15 @@ export default function ArticlesList({
 
   const remove = (id: string) => {
     removeArticle(id);
-    setArticles(loadArticles());
+    const remaining = loadArticles();
+    setArticles(remaining);
+    if (selectedId === id) {
+      const next = remaining.find((a) => !a.archivedAt);
+      setSelectedId(next?.id ?? null);
+    }
   };
+
+  const activeCount = articles.filter((a) => !a.archivedAt).length;
 
   /* "Save to Leaf" bookmarklet, generated against the app's own URL so it
      works from any deployment (localhost, a GitHub Pages subpath, …). */
@@ -173,352 +194,342 @@ export default function ArticlesList({
   const bookmarklet = `javascript:(function(){var%20u=encodeURIComponent(location.href);var%20w=window.open('${appBase}#/add?url='+u,'_blank');if(!w)location.href='${appBase}#/add?url='+u;})();`;
 
   return (
-    <div className="library">
-      <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark brand-mark-articles">
-            <Newspaper size={20} />
+    <div className="articles-shell">
+      <aside className="typographic-rail">
+        <div className="typographic-rail-top">
+          <div className="wordmark-row">
+            <span className="wordmark-title">Leaf</span>
+            <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
           </div>
-          <div className="brand-text">
-            <span className="eyebrow">Save for later</span>
-            <h1>Reading list</h1>
-          </div>
-        </div>
-        <div className="topbar-actions">
+
+          <div className="rail-group-label">Books</div>
           <button
-            className="secondary-action"
+            type="button"
+            className="text-nav-btn"
             onClick={() => navigate("#/")}
-            title="Back to your books"
           >
-            <BookOpen size={15} />
-            Library
+            <span>Bookshelf</span>
           </button>
-          <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
+          <button
+            type="button"
+            className="text-nav-btn"
+            onClick={() => navigate("#/stats")}
+          >
+            <span>Activity</span>
+          </button>
+
+          <div className="rail-group-label">Articles</div>
+          <button type="button" className="text-nav-btn active">
+            <span>Reading List</span>
+            <span className="nav-count">{activeCount}</span>
+          </button>
         </div>
-      </header>
 
-      <main className="content">
-        <form className="add-article" onSubmit={submit}>
-          <div className="search-shell add-article-input">
-            <Link2 size={15} />
-            <input
-              type="text"
-              value={url}
-              onChange={(e) => {
-                setUrl(e.target.value);
-                if (error) setError("");
-              }}
-              placeholder="Paste a link to read later…"
-              aria-label="Article URL"
-            />
-          </div>
-          <button className="add-article-btn" type="submit">
-            <Plus size={15} />
-            Add
-          </button>
-        </form>
-        {error && <p className="article-error">{error}</p>}
-
-        {articles.length > 0 && (
-          <div className="article-filters" role="group" aria-label="Filter articles">
-            {(["all", "unread", "starred", "archived"] as const).map((f) => (
-              <button
-                key={f}
-                className={`filter-chip${filter === f ? " active" : ""}`}
-                onClick={() => setFilter(f)}
-              >
-                {f === "all"
-                  ? "All"
-                  : f === "unread"
-                    ? "Unread"
-                    : f === "starred"
-                      ? "Starred"
-                      : "Archived"}
-              </button>
-            ))}
-            {allTags.map((t) => (
-              <button
-                key={t}
-                className={`filter-chip tag-chip${activeTag === t ? " active" : ""}`}
-                onClick={() => setActiveTag(activeTag === t ? null : t)}
-                title={`Show only “${t}”`}
-              >
-                <Tag size={11} />
-                {t}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {visible.length === 0 ? (
-          <div className="empty-state">
-            <Newspaper size={28} />
-            <p>
-              {articles.length === 0
-                ? "Nothing saved yet — paste a link above."
-                : "Nothing matches this filter."}
-            </p>
-            {articles.length === 0 && (
-              <p className="empty-hint">
-                Tip: drag the “Save to Leaf” link below onto your bookmarks bar
-                to save pages from any website.
-              </p>
-            )}
-          </div>
-        ) : (
-          <ul className="article-list">
-            {visible.map((a) => (
-              <li key={a.id} className="article-row">
-                <button
-                  className="article-row-main"
-                  onClick={() => navigate(`#/article/${a.id}`)}
-                  title={a.title}
-                >
-                  <span
-                    className={`article-status${a.readAt ? "" : " unread"}`}
-                  />
-                  <span className="article-row-text">
-                    <span className="article-row-title">
-                      {a.starredAt ? "★ " : ""}
-                      {a.title}
-                      {a.archivedAt ? " (archived)" : ""}
-                    </span>
-                    <span className="article-row-meta">
-                      {a.domain} · added {timeAgo(a.addedAt)}
-                    </span>
-                    {(a.tags ?? []).length > 0 && (
-                      <span className="article-row-tags">
-                        {(a.tags ?? []).map((t) => (
-                          <span key={t} className="article-tag">
-                            {t}
-                          </span>
-                        ))}
-                      </span>
-                    )}
-                  </span>
-                </button>
-                {tagEditId === a.id ? (
-                  <form
-                    className="tag-editor"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      commitTags(a);
-                    }}
-                  >
-                    <input
-                      autoFocus
-                      value={tagDraft}
-                      onChange={(e) => setTagDraft(e.target.value)}
-                      onBlur={() => commitTags(a)}
-                      placeholder="tags, comma, separated"
-                      aria-label={`Tags for ${a.title}`}
-                    />
-                    <button
-                      type="button"
-                      className="mini-btn"
-                      onClick={() => {
-                        setTagEditId(null);
-                        setTagDraft("");
-                      }}
-                      aria-label="Cancel tag editing"
-                    >
-                      <X size={13} />
-                    </button>
-                  </form>
-                ) : (
-                  <span className="article-row-actions">
-                    <button
-                      className={`mini-btn${a.starredAt ? " star-on" : ""}`}
-                      onClick={() => {
-                        setArticleStar(a.id, !a.starredAt);
-                        setArticles(loadArticles());
-                      }}
-                      title={a.starredAt ? "Remove star" : "Star"}
-                      aria-label={`${a.starredAt ? "Unstar" : "Star"} ${a.title}`}
-                    >
-                      <Star size={14} />
-                    </button>
-                    <button
-                      className="mini-btn"
-                      onClick={() => {
-                        setArticleArchived(a.id, !a.archivedAt);
-                        setArticles(loadArticles());
-                      }}
-                      title={a.archivedAt ? "Unarchive" : "Archive"}
-                      aria-label={`${a.archivedAt ? "Unarchive" : "Archive"} ${a.title}`}
-                    >
-                      {a.archivedAt ? (
-                        <ArchiveRestore size={14} />
-                      ) : (
-                        <Archive size={14} />
-                      )}
-                    </button>
-                    <button
-                      className="mini-btn"
-                      onClick={() => {
-                        setTagEditId(a.id);
-                        setTagDraft((a.tags ?? []).join(", "));
-                      }}
-                      title="Edit tags"
-                      aria-label={`Edit tags for ${a.title}`}
-                    >
-                      <Tag size={14} />
-                    </button>
-                    <button
-                      className="mini-btn"
-                      onClick={() => remove(a.id)}
-                      title="Remove from reading list"
-                      aria-label={`Remove ${a.title}`}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <div className="sync-card">
-          <div className="sync-card-head">
+        <div className="typographic-rail-footer">
+          <div className="sync-status-mini">
             <span
               className={`sync-dot sync-dot-${syncStatus.state}`}
               aria-hidden
             />
-            <strong>Sync across devices</strong>
+            <span>
+              {syncStatus.state === "disconnected"
+                ? "Local only"
+                : syncStatus.backend === "vault"
+                  ? "Vault synced"
+                  : "Gist synced"}
+            </span>
+            {syncStatus.state !== "disconnected" && (
+              <button
+                type="button"
+                className="mini-btn"
+                onClick={() => void manualSync()}
+                disabled={syncBusy}
+                title="Sync now"
+              >
+                <RefreshCw size={12} />
+              </button>
+            )}
           </div>
-
-          {syncStatus.state === "disconnected" ? (
-            <>
-              <p className="sync-hint">
-                Share your reading list with every browser and device you use.
-              </p>
-              {isVaultConnected() ? (
+          {syncStatus.state === "disconnected" && isVaultConnected() && (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => void connectViaVault()}
+              disabled={syncBusy}
+              style={{ width: "100%", justifyContent: "center", marginTop: 6 }}
+            >
+              {syncBusy ? "Connecting…" : "Enable Vault Sync"}
+            </button>
+          )}
+          <details className="rail-sync-details">
+            <summary>Bookmarklet &amp; Sync</summary>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+              <a className="bookmarklet" href={bookmarklet}>
+                <Link2 size={13} />
+                Save to Leaf
+              </a>
+              {syncStatus.state === "disconnected" ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void connect();
+                  }}
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
+                  <input
+                    type="password"
+                    className="sync-token-input"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder="Gist token (optional)"
+                    aria-label="GitHub token"
+                  />
+                  <button
+                    className="secondary-action"
+                    type="submit"
+                    disabled={syncBusy}
+                  >
+                    {syncBusy ? "Connecting…" : "Connect Gist"}
+                  </button>
+                  {connectError && <p className="article-error">{connectError}</p>}
+                </form>
+              ) : (
                 <button
                   type="button"
-                  className="add-article-btn sync-vault-cta"
-                  onClick={() => void connectViaVault()}
-                  disabled={syncBusy}
-                  title="Uses your existing vault connection — no token needed"
-                >
-                  {syncBusy ? (
-                    <Loader2 className="spin" size={15} />
-                  ) : (
-                    <Link2 size={15} />
-                  )}
-                  {syncBusy ? "Connecting…" : "Sync via my vault"}
-                </button>
-              ) : null}
-              <details className="sync-help">
-                <summary>
-                  {isVaultConnected()
-                    ? "Or sync through a GitHub Gist instead"
-                    : "How to get a token"}
-                </summary>
-                <ol>
-                  <li>
-                    Create a{" "}
-                    <strong>GitHub classic personal access token</strong> with
-                    only the <code>gist</code> scope (GitHub → Settings →
-                    Developer settings → Personal access tokens → Tokens
-                    (classic)).
-                  </li>
-                  <li>
-                    Paste it below on each device. The first device creates the
-                    gist; the rest pick it up automatically.
-                  </li>
-                </ol>
-              </details>
-              <form
-                className="sync-connect"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void connect();
-                }}
-              >
-                <input
-                  type="password"
-                  className="sync-token-input"
-                  value={token}
-                  onChange={(e) => {
-                    setToken(e.target.value);
-                    if (connectError) setConnectError("");
-                  }}
-                  placeholder="GitHub token (gist scope)"
-                  aria-label="GitHub token"
-                />
-                <button
-                  className="add-article-btn"
-                  type="submit"
-                  disabled={syncBusy}
-                >
-                  {syncBusy ? (
-                    <Loader2 className="spin" size={15} />
-                  ) : (
-                    <Link2 size={15} />
-                  )}
-                  {syncBusy ? "Connecting…" : "Connect"}
-                </button>
-              </form>
-              {connectError && <p className="article-error">{connectError}</p>}
-            </>
-          ) : (
-            <>
-              <p className="sync-hint">
-                {syncStatus.state === "connecting"
-                  ? "Connecting…"
-                  : syncStatus.state === "syncing"
-                    ? "Syncing…"
-                    : syncStatus.state === "error"
-                      ? syncStatus.lastError ?? "Sync failed — will retry."
-                      : syncStatus.lastSyncedAt != null
-                        ? `Synced ${timeAgo(syncStatus.lastSyncedAt)}${
-                            syncStatus.backend === "vault"
-                              ? " via your vault"
-                              : ""
-                          }.`
-                        : "Connected."}
-              </p>
-              <div className="sync-actions">
-                <button
                   className="secondary-action"
-                  onClick={() => void manualSync()}
-                  disabled={syncBusy}
-                  title="Sync now"
-                >
-                  <RefreshCw size={15} />
-                  Sync now
-                </button>
-                <button
-                  className="secondary-action sync-disconnect"
                   onClick={disconnect}
-                  title="Stop syncing"
                 >
-                  <Unplug size={15} />
-                  Disconnect
+                  <Unplug size={13} />
+                  Disconnect sync
                 </button>
-              </div>
-            </>
+              )}
+            </div>
+          </details>
+        </div>
+      </aside>
+
+      <div
+        className={`articles-workspace${listMinimized ? " list-minimized" : ""}`}
+      >
+        <section className="articles-feed-pane">
+          <div className="articles-feed-head">
+            <h2>Reading List</h2>
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => setListMinimized(true)}
+              title="Minimize reading list"
+            >
+              Hide
+            </button>
+          </div>
+
+          <form className="add-article compact-add-article" onSubmit={submit}>
+            <div className="search-shell add-article-input">
+              <Link2 size={14} />
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  if (error) setError("");
+                }}
+                placeholder="Paste article link…"
+                aria-label="Article URL"
+              />
+            </div>
+            <button className="add-article-btn" type="submit">
+              <Plus size={14} />
+              Save
+            </button>
+          </form>
+          {error && <p className="article-error">{error}</p>}
+
+          {articles.length > 0 && (
+            <div className="article-filters" role="group" aria-label="Filter articles">
+              {(["all", "unread", "starred", "archived"] as const).map((f) => (
+                <button
+                  key={f}
+                  className={`filter-chip${filter === f ? " active" : ""}`}
+                  onClick={() => setFilter(f)}
+                >
+                  {f === "all"
+                    ? "All"
+                    : f === "unread"
+                      ? "Unread"
+                      : f === "starred"
+                        ? "Starred"
+                        : "Archived"}
+                </button>
+              ))}
+              {allTags.map((t) => (
+                <button
+                  key={t}
+                  className={`filter-chip tag-chip${activeTag === t ? " active" : ""}`}
+                  onClick={() => setActiveTag(activeTag === t ? null : t)}
+                  title={`Show only “${t}”`}
+                >
+                  <Tag size={11} />
+                  {t}
+                </button>
+              ))}
+            </div>
           )}
-        </div>
 
-        <div className="bookmarklet-section">
-          <strong>Save pages from anywhere</strong>
-          <p>
-            Drag this link to your bookmarks bar. On any website, click it to
-            add the page you’re on to your reading list.
-          </p>
-          <a className="bookmarklet" href={bookmarklet}>
-            <Link2 size={14} />
-            Save to Leaf
-          </a>
-        </div>
+          {visible.length === 0 ? (
+            <div className="empty-state">
+              <Newspaper size={26} />
+              <p>
+                {articles.length === 0
+                  ? "Nothing saved yet — paste a link above."
+                  : "Nothing matches this filter."}
+              </p>
+            </div>
+          ) : (
+            <ul className="article-list compact-article-list">
+              {visible.map((a) => (
+                <li
+                  key={a.id}
+                  className={`article-row${selectedArticle?.id === a.id ? " active" : ""}`}
+                >
+                  <button
+                    className="article-row-main"
+                    onClick={() => setSelectedId(a.id)}
+                    title={a.title}
+                  >
+                    <span
+                      className={`article-status${a.readAt ? "" : " unread"}`}
+                    />
+                    <span className="article-row-text">
+                      <span className="article-row-title">
+                        {a.starredAt ? "★ " : ""}
+                        {a.title}
+                        {a.archivedAt ? " (archived)" : ""}
+                      </span>
+                      <span className="article-row-meta">
+                        {a.domain}
+                        {a.readingMinutes ? ` · ${a.readingMinutes}m` : ""}
+                        {a.contentStatus === "pending" ? " · Extracting…" : ""}
+                        {" · "}
+                        {timeAgo(a.addedAt)}
+                      </span>
+                    </span>
+                  </button>
 
-        <p className="footnote">
-          Saved links live in this browser. Turn on sync (below) to mirror them
-          across devices via a GitHub Gist.
-        </p>
-      </main>
+                  {tagEditId === a.id ? (
+                    <form
+                      className="tag-editor"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        commitTags(a);
+                      }}
+                    >
+                      <input
+                        autoFocus
+                        value={tagDraft}
+                        onChange={(e) => setTagDraft(e.target.value)}
+                        onBlur={() => commitTags(a)}
+                        placeholder="tags, comma, separated"
+                        aria-label={`Tags for ${a.title}`}
+                      />
+                      <button
+                        type="button"
+                        className="mini-btn"
+                        onClick={() => {
+                          setTagEditId(null);
+                          setTagDraft("");
+                        }}
+                        aria-label="Cancel tag editing"
+                      >
+                        <X size={13} />
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="article-row-footer">
+                      {(a.tags ?? []).length > 0 && (
+                        <span className="article-row-tags">
+                          {(a.tags ?? []).map((t) => (
+                            <span key={t} className="article-tag">
+                              {t}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                      <span className="article-row-actions">
+                        <button
+                          className={`mini-btn${a.starredAt ? " star-on" : ""}`}
+                          onClick={() => {
+                            setArticleStar(a.id, !a.starredAt);
+                            setArticles(loadArticles());
+                          }}
+                          title={a.starredAt ? "Remove star" : "Star"}
+                          aria-label={`${a.starredAt ? "Unstar" : "Star"} ${a.title}`}
+                        >
+                          <Star size={13} />
+                        </button>
+                        <button
+                          className="mini-btn"
+                          onClick={() => {
+                            setArticleArchived(a.id, !a.archivedAt);
+                            setArticles(loadArticles());
+                          }}
+                          title={a.archivedAt ? "Unarchive" : "Archive"}
+                          aria-label={`${a.archivedAt ? "Unarchive" : "Archive"} ${a.title}`}
+                        >
+                          {a.archivedAt ? (
+                            <ArchiveRestore size={13} />
+                          ) : (
+                            <Archive size={13} />
+                          )}
+                        </button>
+                        <button
+                          className="mini-btn"
+                          onClick={() => {
+                            setTagEditId(a.id);
+                            setTagDraft((a.tags ?? []).join(", "));
+                          }}
+                          title="Edit tags"
+                          aria-label={`Edit tags for ${a.title}`}
+                        >
+                          <Tag size={13} />
+                        </button>
+                        <button
+                          className="mini-btn"
+                          onClick={() => remove(a.id)}
+                          title="Remove"
+                          aria-label={`Remove ${a.title}`}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="articles-reader-pane">
+          {selectedArticle ? (
+            <ArticleReader
+              key={selectedArticle.id}
+              article={selectedArticle}
+              theme={theme}
+              onCycleTheme={onCycleTheme}
+              embedded
+              listMinimized={listMinimized}
+              onToggleList={() => setListMinimized((m) => !m)}
+            />
+          ) : (
+            <div className="articles-empty-reader">
+              <Newspaper size={28} />
+              <strong>Select an article to read</strong>
+              <p>Paste a link on the left or pick an item from your Reading List.</p>
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

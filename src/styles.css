@@ -4356,3 +4356,325 @@ html.dark-theme .continue-cover {
     display: none;
   }
 }
+
+/* ---------- Split Articles Workspace (Typographic Rail + Feed + Reader) ---------- */
+
+.articles-shell {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+.typographic-rail {
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.wordmark-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 14px;
+  border-bottom: 1px solid var(--border-color-light);
+}
+
+.wordmark-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.rail-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+  padding: 16px 8px 4px;
+}
+
+.text-nav-btn {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  position: relative;
+}
+
+.text-nav-btn:hover {
+  color: var(--text-main);
+  background: var(--border-color-light);
+}
+
+.text-nav-btn.active {
+  color: var(--text-main);
+  font-weight: 600;
+  background: var(--bg-card);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
+}
+
+.text-nav-btn.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 99px;
+  background: var(--primary-color);
+}
+
+.nav-count {
+  font-size: 11px;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.typographic-rail-footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color-light);
+  font-size: 12px;
+}
+
+.sync-status-mini {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+}
+
+.sync-status-mini .mini-btn {
+  margin-left: auto;
+}
+
+.rail-sync-details {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.rail-sync-details summary {
+  cursor: pointer;
+}
+
+.articles-workspace {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  min-width: 0;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.articles-workspace.list-minimized {
+  grid-template-columns: 0px minmax(0, 1fr);
+}
+
+.articles-workspace.list-minimized .articles-feed-pane {
+  padding-left: 0;
+  padding-right: 0;
+  border-right: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.articles-feed-pane {
+  background: var(--bg-app);
+  border-right: 1px solid var(--border-color);
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  transition: opacity 0.15s ease;
+}
+
+.articles-feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.articles-feed-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.compact-add-article {
+  margin: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.compact-add-article .add-article-input {
+  flex: 1 1 0%;
+  min-width: 0;
+  width: auto;
+}
+
+.compact-add-article .add-article-input input {
+  width: 100%;
+  min-width: 0;
+}
+
+.compact-add-article .add-article-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0 12px;
+}
+
+.compact-article-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compact-article-list .article-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 13px;
+}
+
+.compact-article-list .article-row.active {
+  background: var(--primary-bg);
+  border-color: var(--primary-color);
+}
+
+.compact-article-list .article-row-main {
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  padding: 0;
+}
+
+.compact-article-list .article-status {
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.compact-article-list .article-row-text {
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+}
+
+.compact-article-list .article-row-title {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+}
+
+.compact-article-list .article-row-meta {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.compact-article-list .article-row-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-left: 16px;
+}
+
+.compact-article-list .article-row-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.articles-reader-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  min-width: 0;
+  background: var(--bg-card);
+}
+
+.embedded-article-reader {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.embedded-article-reader .article-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.articles-empty-reader {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  padding: 32px;
+  text-align: center;
+}
+
+.articles-empty-reader strong {
+  color: var(--text-main);
+  font-size: 15px;
+}
+
+.articles-empty-reader p {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+@media (max-width: 900px) {
+  .articles-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .articles-workspace {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  .articles-workspace.list-minimized {
+    grid-template-columns: 1fr;
+  }
+  .articles-reader-pane {
+    height: auto;
+    min-height: 70vh;
+  }
+}

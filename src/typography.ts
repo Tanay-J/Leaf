@@ -14,9 +14,34 @@ export interface FontOption {
 export const FONT_OPTIONS: FontOption[] = [
   { id: "", label: "Default font" },
   {
+    id: "lora",
+    label: "Lora (Classic Serif)",
+    stack: "'Lora', Georgia, serif",
+  },
+  {
+    id: "cormorant",
+    label: "Cormorant Garamond",
+    stack: "'Cormorant Garamond', Garamond, Georgia, serif",
+  },
+  {
     id: "literata",
     label: "Literata (book)",
     stack: "'Literata', Georgia, serif",
+  },
+  {
+    id: "newsreader",
+    label: "Newsreader (Editorial)",
+    stack: "'Newsreader', Georgia, serif",
+  },
+  {
+    id: "eb-garamond",
+    label: "EB Garamond",
+    stack: "'EB Garamond', Garamond, Georgia, serif",
+  },
+  {
+    id: "libre-baskerville",
+    label: "Libre Baskerville",
+    stack: "'Libre Baskerville', Baskerville, Georgia, serif",
   },
   {
     id: "serif",
@@ -27,12 +52,6 @@ export const FONT_OPTIONS: FontOption[] = [
     id: "book",
     label: "Book — Palatino",
     stack: "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
-  },
-  {
-    id: "baskerville",
-    label: "Baskerville",
-    stack:
-      "Baskerville, 'Baskerville Old Face', 'Hoefler Text', Garamond, 'Times New Roman', serif",
   },
   {
     id: "charter",

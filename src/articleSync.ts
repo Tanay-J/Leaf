@@ -21,9 +21,13 @@ import {
   ARTICLES_CHANGED_EVENT,
   domainOf,
   loadAllArticles,
+  parseReaderResponse,
   replaceArticles,
+  setArticleContentStatus,
+  updateArticleExtracted,
   type SavedArticle,
 } from "./articles";
+import { saveArticleContent } from "./localBooks";
 import {
   ensureVaultBranch,
   getVaultText,
@@ -142,11 +146,18 @@ function writeMeta(m: SyncMeta | null): void {
   }
 }
 
-/** The transport that's both selected and actually usable right now. */
+/** The transport that's both selected and actually usable right now.
+ *  When the vault is connected, article sync is active automatically unless
+ *  the user explicitly configured the legacy GitHub Gist transport. */
 function activeBackend(): Backend | null {
-  if (!meta) return null;
-  if (meta.backend === "vault") return isVaultConnected() ? "vault" : null;
-  return config ? "gist" : null;
+  if (meta?.backend === "gist") return config ? "gist" : null;
+  if (isVaultConnected()) {
+    if (meta?.backend !== "vault") {
+      meta = { backend: "vault", lastSyncedAt: meta?.lastSyncedAt ?? null };
+    }
+    return "vault";
+  }
+  return null;
 }
 
 function initStatus(): SyncStatus {
@@ -273,20 +284,27 @@ function mergePair(l: SavedArticle, r: SavedArticle): SavedArticle {
     };
   }
 
-  // Both live — keep the earliest add (stable id), latest read, and the
-  // starred/archived/tags state from whichever side was touched last.
+  const winner = lTouched >= rTouched ? l : r;
   return {
     id: l.addedAt <= r.addedAt ? l.id : r.id,
     url: r.url,
-    title: lTouched >= rTouched ? l.title : r.title,
+    title: winner.title,
     domain: l.domain || r.domain || domainOf(r.url),
     addedAt: Math.min(l.addedAt, r.addedAt),
     readAt: l.readAt != null ? l.readAt : r.readAt,
-    starredAt:
-      (lTouched >= rTouched ? l.starredAt : r.starredAt) ?? null,
-    archivedAt:
-      (lTouched >= rTouched ? l.archivedAt : r.archivedAt) ?? null,
-    tags: lTouched >= rTouched ? (l.tags ?? []) : (r.tags ?? []),
+    starredAt: winner.starredAt ?? null,
+    archivedAt: winner.archivedAt ?? null,
+    tags: winner.tags ?? [],
+    ...(winner.excerpt || l.excerpt || r.excerpt
+      ? { excerpt: winner.excerpt ?? l.excerpt ?? r.excerpt }
+      : {}),
+    ...(winner.readingMinutes ?? l.readingMinutes ?? r.readingMinutes
+      ? { readingMinutes: winner.readingMinutes ?? l.readingMinutes ?? r.readingMinutes }
+      : {}),
+    ...(winner.contentStatus ?? l.contentStatus ?? r.contentStatus
+      ? { contentStatus: winner.contentStatus ?? l.contentStatus ?? r.contentStatus }
+      : {}),
+    progress: Math.max(l.progress ?? 0, r.progress ?? 0),
     updatedAt: Math.max(lTouched, rTouched),
     removedAt: null,
   };
@@ -339,6 +357,68 @@ async function pushVault(list: SavedArticle[]): Promise<void> {
       ref: SYNC_BRANCH,
       message: VAULT_COMMIT_MSG,
     });
+  }
+}
+
+function articleContentPath(id: string): string {
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `articles/content/${safe}.md`;
+}
+
+/** Uploads an article's extracted markdown to the vault's sync branch. */
+export async function syncArticleContent(
+  id: string,
+  markdown: string
+): Promise<void> {
+  if (!isVaultConnected() || !markdown.trim()) return;
+  const path = articleContentPath(id);
+  try {
+    const existing = await getVaultText(path, SYNC_BRANCH).catch(() => null);
+    await putVaultText(path, markdown, {
+      ref: SYNC_BRANCH,
+      message: `Save article content ${id} (Leaf)`,
+      ...(existing?.sha ? { sha: existing.sha } : {}),
+    });
+  } catch (err) {
+    if (err instanceof VaultMissingRefError) {
+      await ensureVaultBranch(SYNC_BRANCH);
+      await putVaultText(path, markdown, {
+        ref: SYNC_BRANCH,
+        message: `Save article content ${id} (Leaf)`,
+      });
+    }
+  }
+}
+
+/** Downloads an article's extracted markdown from the vault's sync branch. */
+export async function fetchVaultArticleContent(
+  id: string
+): Promise<string | null> {
+  if (!isVaultConnected()) return null;
+  try {
+    const entry = await getVaultText(articleContentPath(id), SYNC_BRANCH);
+    return entry?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Extracts clean markdown for a newly added article, caches it locally,
+ *  and pushes both metadata and full text to the vault. */
+export async function extractAndSyncArticle(
+  article: SavedArticle
+): Promise<void> {
+  try {
+    const res = await fetch(`https://r.jina.ai/${article.url}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = await res.text();
+    const { title, markdown } = parseReaderResponse(raw);
+    if (!markdown) throw new Error("Empty article");
+    await saveArticleContent(article.id, markdown).catch(() => {});
+    updateArticleExtracted(article.id, { title, markdown });
+    await syncArticleContent(article.id, markdown).catch(() => {});
+  } catch {
+    setArticleContentStatus(article.id, "failed");
   }
 }
 
@@ -425,6 +505,7 @@ function onArticlesChanged(): void {
 
 /* ---------- public API ---------- */
 let startupPullQueued = false;
+let lastFocusPullAt = 0;
 
 /** Called once from App: listens for local mutations and pulls remote once. */
 export function initSync(): void {
@@ -432,6 +513,13 @@ export function initSync(): void {
   initialized = true;
   try {
     window.addEventListener(ARTICLES_CHANGED_EVENT, onArticlesChanged);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      if (!activeBackend()) return;
+      if (Date.now() - lastFocusPullAt < 60_000) return;
+      lastFocusPullAt = Date.now();
+      void pullAndMerge().catch(() => {});
+    });
   } catch {
     /* unavailable */
   }

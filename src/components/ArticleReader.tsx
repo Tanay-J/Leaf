@@ -1,9 +1,28 @@
-import { useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ExternalLink,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+} from "lucide-react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { setArticleRead, updateArticleTitle, type SavedArticle } from "../articles";
-import { navigate, type Theme } from "../lib";
+import {
+  parseReaderResponse,
+  setArticleProgress,
+  setArticleRead,
+  updateArticleExtracted,
+  type SavedArticle,
+} from "../articles";
+import { fetchVaultArticleContent, syncArticleContent } from "../articleSync";
+import {
+  SETTINGS_CHANGED_EVENT,
+  navigate,
+  notifySettingsChanged,
+  type Theme,
+} from "../lib";
 import { loadArticleContent, saveArticleContent } from "../localBooks";
 import {
   ARTICLE_DEFAULT_LINE_HEIGHT,
@@ -18,6 +37,9 @@ interface Props {
   article: SavedArticle;
   theme: Theme;
   onCycleTheme: () => void;
+  embedded?: boolean;
+  listMinimized?: boolean;
+  onToggleList?: () => void;
 }
 
 const FONT_KEY = "article-font";
@@ -58,7 +80,14 @@ function loadSpacingId(): string {
  * then is rendered as sanitized HTML. Sites that block extraction fall
  * back to an "open original" escape hatch.
  */
-export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
+export default function ArticleReader({
+  article,
+  theme,
+  onCycleTheme,
+  embedded,
+  listMinimized,
+  onToggleList,
+}: Props) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [html, setHtml] = useState("");
   const [errorText, setErrorText] = useState("");
@@ -66,11 +95,24 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
   const [font, setFont] = useState<number>(loadFont);
   const [fontFamily, setFontFamily] = useState<string>(loadFontFamily);
   const [spacingId, setSpacingId] = useState<string>(loadSpacingId);
+
+  useEffect(() => {
+    const onSettings = () => {
+      setFont(loadFont());
+      setFontFamily(loadFontFamily());
+      setSpacingId(loadSpacingId());
+    };
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+    return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, onSettings);
+  }, []);
   const [retry, setRetry] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const restoredRef = useRef(false);
 
   useEffect(() => {
     let disposed = false;
     const controller = new AbortController();
+    restoredRef.current = false;
     setStatus("loading");
     setErrorText("");
     setHtml("");
@@ -82,15 +124,27 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
     };
 
     /* Stale-while-revalidate: show the cached copy immediately (offline
-       friendly), then refresh from the source in the background. */
+       friendly), then check vault sync or refresh from the source. */
     let hadCache = false;
     void loadArticleContent(article.id)
-      .then((cached) => {
-        if (disposed || !cached) return;
+      .then(async (cached) => {
+        if (disposed) return;
+        if (cached) {
+          hadCache = true;
+          const parsed = parseReaderResponse(cached);
+          render(parsed.markdown);
+          setStatus("ready");
+          setArticleRead(article.id, true);
+          return;
+        }
+        const vaultMd = await fetchVaultArticleContent(article.id);
+        if (disposed || !vaultMd) return;
         hadCache = true;
-        render(cached);
+        const parsed = parseReaderResponse(vaultMd);
+        render(parsed.markdown);
         setStatus("ready");
         setArticleRead(article.id, true);
+        void saveArticleContent(article.id, parsed.markdown).catch(() => {});
       })
       .catch(() => {});
 
@@ -100,20 +154,19 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const md = await res.text();
+        const raw = await res.text();
         if (disposed) return;
-        render(md);
+        const parsed = parseReaderResponse(raw);
+        render(parsed.markdown);
         setStatus("ready");
         setArticleRead(article.id, true);
-        void saveArticleContent(article.id, md).catch(() => {});
-        const heading = /^#\s+(.+)$/m.exec(md.slice(0, 4000))?.[1];
-        if (heading?.trim()) {
-          setFetchedTitle(heading.trim());
-          updateArticleTitle(article.id, heading.trim());
-        }
+        void saveArticleContent(article.id, parsed.markdown).catch(() => {});
+        void syncArticleContent(article.id, parsed.markdown).catch(() => {});
+        updateArticleExtracted(article.id, parsed);
+        if (parsed.title) setFetchedTitle(parsed.title);
       } catch (err) {
         if (disposed || controller.signal.aborted) return;
-        // A cached copy beats an error page.
+        // A cached or vault-synced copy beats an error page.
         if (hadCache) return;
         setErrorText(err instanceof Error ? err.message : String(err));
         setStatus("error");
@@ -126,6 +179,41 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
     };
   }, [article.id, article.url, retry]);
 
+  useEffect(() => {
+    if (status !== "ready") return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    if (!restoredRef.current) {
+      restoredRef.current = true;
+      const target = article.progress ?? 0;
+      if (target > 0.02) {
+        requestAnimationFrame(() => {
+          const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+          if (maxScroll > 0) {
+            el.scrollTop = Math.round(maxScroll * target);
+          }
+        });
+      }
+    }
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+        if (maxScroll <= 0) return;
+        const pct = Math.min(1, Math.max(0, el.scrollTop / maxScroll));
+        setArticleProgress(article.id, pct);
+      }, 400);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, [status, article.id, article.progress]);
+
   function changeFont(delta: number): void {
     setFont((f) => {
       const next = Math.min(180, Math.max(80, f + delta));
@@ -136,6 +224,7 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
       }
       return next;
     });
+    notifySettingsChanged();
   }
 
   function changeFontFamily(id: string): void {
@@ -145,6 +234,7 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
     } catch {
       /* ignore */
     }
+    notifySettingsChanged();
   }
 
   function changeSpacing(id: string): void {
@@ -154,24 +244,53 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
     } catch {
       /* ignore */
     }
+    notifySettingsChanged();
   }
 
   const title = fetchedTitle ?? article.title;
 
   return (
-    <div className="article-reader">
+    <div className={`article-reader${embedded ? " embedded-article-reader" : ""}`}>
       <header className="topbar reader-topbar">
         <div className="topbar-actions">
-          <button className="secondary-action" onClick={() => navigate("#/articles")}>
-            <ArrowLeft size={15} />
-            Reading list
-          </button>
+          {embedded && onToggleList ? (
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={onToggleList}
+              title={listMinimized ? "Show reading list" : "Minimize reading list"}
+            >
+              {listMinimized ? (
+                <PanelLeftOpen size={15} />
+              ) : (
+                <PanelLeftClose size={15} />
+              )}
+              {listMinimized ? "Show List" : "Minimize List"}
+            </button>
+          ) : (
+            <button className="secondary-action" onClick={() => navigate("#/articles")}>
+              <ArrowLeft size={15} />
+              Reading list
+            </button>
+          )}
         </div>
         <div className="reader-title">
           <strong>{title}</strong>
-          <span>{article.domain}</span>
+          <span>
+            {article.domain}
+            {article.readingMinutes ? ` · ${article.readingMinutes} min read` : ""}
+          </span>
         </div>
         <div className="topbar-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setRetry((r) => r + 1)}
+            title="Re-fetch fresh copy from web"
+            aria-label="Refresh article"
+          >
+            <RefreshCw size={14} />
+          </button>
           <a
             className="icon-btn"
             href={article.url}
@@ -189,7 +308,7 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
             onSpacing={changeSpacing}
             onSize={changeFont}
           />
-          <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
+          {!embedded && <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />}
         </div>
       </header>
 
@@ -222,7 +341,7 @@ export default function ArticleReader({ article, theme, onCycleTheme }: Props) {
           </div>
         )}
         {status === "ready" && (
-          <div className="article-scroll">
+          <div className="article-scroll" ref={scrollRef}>
             <div
               className="article-prose"
               style={{

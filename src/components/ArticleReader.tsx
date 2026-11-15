@@ -409,7 +409,7 @@ export default function ArticleReader({
                     placeholder="Custom tag…"
                     aria-label="Add custom tag"
                   />
-                  <button type="submit" className="mini-btn" disabled={!customTag.trim()}>
+                  <button type="submit" className="tag-custom-add-btn" disabled={!customTag.trim()}>
                     Add
                   </button>
                 </form>

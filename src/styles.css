@@ -2124,13 +2124,14 @@ html.dark-theme .brand-mark-articles {
 }
 
 .article-tag {
-  background: var(--tag-bg);
-  border: 1px solid var(--border-color-light);
-  color: var(--text-subtle);
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 1px 7px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
   border-radius: 999px;
+  line-height: 1.4;
 }
 
 .tag-editor {
@@ -4512,7 +4513,7 @@ html.dark-theme .continue-cover {
 
 .articles-workspace {
   display: grid;
-  grid-template-columns: 332px minmax(0, 1fr);
+  grid-template-columns: clamp(440px, 34vw, 520px) minmax(0, 1fr);
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -4535,7 +4536,7 @@ html.dark-theme .continue-cover {
 .articles-feed-pane {
   background: var(--bg-app);
   border-right: 1px solid var(--border-color);
-  padding: 18px 16px;
+  padding: 20px 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -4545,11 +4546,16 @@ html.dark-theme .continue-cover {
   transition: opacity 0.15s ease;
 }
 
+.articles-feed-pane > * {
+  flex-shrink: 0;
+}
+
 .articles-feed-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .articles-feed-head h2 {
@@ -4565,6 +4571,7 @@ html.dark-theme .continue-cover {
   gap: 8px;
   width: 100%;
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .compact-add-article .add-article-input {
@@ -4732,14 +4739,12 @@ html.dark-theme .continue-cover {
 .article-category-strip {
   display: flex;
   align-items: center;
-  gap: 5px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 2px;
-}
-
-.article-category-strip::-webkit-scrollbar {
-  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: max-content;
+  overflow: visible;
+  padding: 2px 0;
 }
 
 .category-pill {
@@ -4749,10 +4754,11 @@ html.dark-theme .continue-cover {
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid var(--border-color);
-  background: var(--tag-bg);
-  color: var(--text-subtle);
+  background: var(--bg-card);
+  color: var(--text-muted);
   font-size: 11.5px;
   font-weight: 600;
+  line-height: 1.3;
   white-space: nowrap;
   flex-shrink: 0;
   transition: all 0.14s ease;
@@ -4845,12 +4851,34 @@ html.dark-theme .continue-cover {
 .tag-picker-custom input {
   flex: 1;
   min-width: 0;
-  padding: 5px 9px;
+  height: 30px;
+  padding: 0 10px;
   border-radius: 7px;
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-main);
   font-size: 12px;
+}
+
+.tag-custom-add-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--primary-color);
+  background: var(--primary-color);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.14s ease;
+}
+
+.tag-custom-add-btn:disabled {
+  border-color: var(--border-color);
+  background: var(--tag-bg);
+  color: var(--text-subtle);
+  cursor: default;
 }
 
 /* Reader topbar tag dropdown */

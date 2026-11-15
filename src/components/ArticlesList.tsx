@@ -427,6 +427,14 @@ export default function ArticlesList({
             className="article-category-strip"
             role="group"
             aria-label="Filter by category"
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 6,
+              flexShrink: 0,
+              overflow: "visible",
+            }}
           >
             <button
               type="button"
@@ -594,7 +602,7 @@ export default function ArticlesList({
                         />
                         <button
                           type="submit"
-                          className="mini-btn"
+                          className="tag-custom-add-btn"
                           disabled={!tagDraft.trim()}
                         >
                           Add

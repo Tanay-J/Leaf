@@ -126,13 +126,21 @@ function readingStats(): { finished: number; inProgress: number; streak: number 
 interface Props {
   theme: Theme;
   onCycleTheme: () => void;
+  initialTab?: "mine" | "browse";
 }
 
-export default function Library({ theme, onCycleTheme }: Props) {
+export default function Library({
+  theme,
+  onCycleTheme,
+  initialTab = "mine",
+}: Props) {
   const [query, setQuery] = useState("");
   const { view, setView } = useLibraryView();
   /* Which collection is on screen: your picks or the built-in catalog. */
-  const [tab, setTab] = useState<"mine" | "browse">("mine");
+  const [tab, setTab] = useState<"mine" | "browse">(initialTab);
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
   const [books, setBooks] = useState<Book[]>(() => getMyLibrary());
   /* Browse shelf: the CI-published catalog (static list until it loads). */
   const [catalog, setCatalog] = useState<Book[]>(getCatalog);

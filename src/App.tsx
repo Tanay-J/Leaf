@@ -115,7 +115,12 @@ export default function App() {
   if (parsed.path === "#/add") return null; // redirecting via the effect above
 
   if (parsed.path === "#/books" || parsed.path === "#/library") {
-    return <Library {...shared} />;
+    return (
+      <Library
+        {...shared}
+        initialTab={parsed.query.get("tab") === "browse" ? "browse" : "mine"}
+      />
+    );
   }
 
   return (

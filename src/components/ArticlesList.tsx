@@ -1,13 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
+  Activity,
   Archive,
   ArchiveRestore,
+  BookOpen,
   Check,
+  Compass,
   Link2,
   Newspaper,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Search,
   Star,
   Tag,
   Trash2,
@@ -27,10 +31,37 @@ import {
   type SavedArticle,
 } from "../articles";
 import { extractAndSyncArticle } from "../articleSync";
-import { navigate, type Theme } from "../lib";
+import { getCatalog } from "../books";
+import { navigate, readDays, type Theme } from "../lib";
+import { getMyLibrary, USER_BOOKS_CHANGED_EVENT } from "../userBooks";
 import ArticleReader from "./ArticleReader";
+import NowReadingCard from "./NowReadingCard";
 import SyncCard from "./SyncCard";
 import ThemeButton from "./ThemeButton";
+
+function currentStreak(): number {
+  const days = readDays();
+  const key = (d: Date) => d.toLocaleDateString("en-CA");
+  let streak = 0;
+  const cursor = new Date();
+  if (!days[key(cursor)]) cursor.setDate(cursor.getDate() - 1);
+  while (days[key(cursor)]) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+/** True when input looks like a URL or domain rather than a text search query. */
+function looksLikeUrl(raw: string): boolean {
+  const s = raw.trim();
+  if (!s || /\s/.test(s)) return false;
+  if (/^https?:\/\//i.test(s)) return true;
+  return (
+    /^[a-z0-9-]+(\.[a-z0-9-]+)+\/.*$/i.test(s) ||
+    /^[a-z0-9-]+(\.[a-z]{2,})+$/i.test(s)
+  );
+}
 
 interface Props {
   theme: Theme;
@@ -79,6 +110,9 @@ export default function ArticlesList({
   const [tagEditId, setTagEditId] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
 
+  const isUrlInput = looksLikeUrl(url);
+  const searchQuery = !isUrlInput ? url.trim().toLowerCase() : "";
+
   const visible = articles.filter((a) => {
     if (filter === "archived") {
       if (!a.archivedAt) return false;
@@ -88,9 +122,16 @@ export default function ArticlesList({
       if (filter === "starred" && !a.starredAt) return false;
     }
     if (activeTag === "__untagged__") {
-      return (a.tags ?? []).length === 0;
+      if ((a.tags ?? []).length > 0) return false;
+    } else if (activeTag && !(a.tags ?? []).includes(activeTag)) {
+      return false;
     }
-    if (activeTag && !(a.tags ?? []).includes(activeTag)) return false;
+    if (searchQuery) {
+      const hay = `${a.title} ${a.domain} ${a.excerpt ?? ""} ${(
+        a.tags ?? []
+      ).join(" ")}`.toLowerCase();
+      if (!hay.includes(searchQuery)) return false;
+    }
     return true;
   });
 
@@ -135,17 +176,24 @@ export default function ArticlesList({
     setTagDraft("");
   };
 
+  const [myBooksCount, setMyBooksCount] = useState(() => getMyLibrary().length);
+  const catalogCount = getCatalog().length;
+  const streak = currentStreak();
+
   useEffect(() => {
     const onArticles = () => setArticles(loadArticles());
+    const onBooks = () => setMyBooksCount(getMyLibrary().length);
     window.addEventListener(ARTICLES_CHANGED_EVENT, onArticles);
+    window.addEventListener(USER_BOOKS_CHANGED_EVENT, onBooks);
     return () => {
       window.removeEventListener(ARTICLES_CHANGED_EVENT, onArticles);
+      window.removeEventListener(USER_BOOKS_CHANGED_EVENT, onBooks);
     };
   }, []);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!url.trim()) return;
+    if (!url.trim() || !isUrlInput) return;
     try {
       const { article, added } = addArticle(url.trim());
       setUrl("");
@@ -177,81 +225,122 @@ export default function ArticlesList({
 
   return (
     <div className={`articles-shell${listMinimized ? " list-minimized" : ""}`}>
-      <aside className="typographic-rail">
-        <div className="typographic-rail-top">
-          <div className="wordmark-row">
-            <span className="wordmark-title">Leaf</span>
-            <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
+      <aside className="studio-rail">
+        <div className="studio-brand" style={{ justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="brand-mark">
+              <BookOpen size={18} />
+            </div>
+            <div className="brand-text">
+              <span className="eyebrow">Personal Reader</span>
+              <h1>Leaf</h1>
+            </div>
           </div>
+          <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
+        </div>
 
-          <div className="rail-group-label">Articles</div>
+        <div className="studio-nav-group">
+          <span className="studio-nav-label">Workspace</span>
           <button
             type="button"
-            className={`text-nav-btn${filter === "all" ? " active" : ""}`}
+            className="studio-nav-btn"
+            onClick={() => navigate("#/books")}
+          >
+            <BookOpen size={15} />
+            <span>My Shelf</span>
+            <span className="studio-nav-count">{myBooksCount}</span>
+          </button>
+          <button
+            type="button"
+            className="studio-nav-btn"
+            onClick={() => navigate("#/books?tab=browse")}
+          >
+            <Compass size={15} />
+            <span>Browse Catalog</span>
+            <span className="studio-nav-count">{catalogCount}</span>
+          </button>
+          <button
+            type="button"
+            className="studio-nav-btn active"
+            onClick={() => setListMinimized(false)}
+          >
+            <Newspaper size={15} />
+            <span>Reading List</span>
+            {unreadCount > 0 && (
+              <span className="studio-nav-count accent">{unreadCount}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            className="studio-nav-btn"
+            onClick={() => navigate("#/stats")}
+          >
+            <Activity size={15} />
+            <span>Activity &amp; Stats</span>
+            {streak > 0 && (
+              <span className="studio-nav-count">🔥 {streak}d</span>
+            )}
+          </button>
+        </div>
+
+        <div className="studio-nav-group">
+          <span className="studio-nav-label">Filter Articles</span>
+          <button
+            type="button"
+            className={`studio-nav-btn${filter === "all" ? " active" : ""}`}
             onClick={() => {
               setFilter("all");
               setListMinimized(false);
             }}
           >
+            <span className="studio-dot dot-all" />
             <span>All Articles</span>
-            <span className="nav-count">{activeCount}</span>
+            <span className="studio-nav-count">{activeCount}</span>
           </button>
           <button
             type="button"
-            className={`text-nav-btn${filter === "unread" ? " active" : ""}`}
+            className={`studio-nav-btn${filter === "unread" ? " active" : ""}`}
             onClick={() => {
               setFilter("unread");
               setListMinimized(false);
             }}
           >
+            <span className="studio-dot dot-reading" />
             <span>Unread</span>
-            <span className="nav-count">{unreadCount}</span>
+            <span className="studio-nav-count">{unreadCount}</span>
           </button>
           <button
             type="button"
-            className={`text-nav-btn${filter === "starred" ? " active" : ""}`}
+            className={`studio-nav-btn${filter === "starred" ? " active" : ""}`}
             onClick={() => {
               setFilter("starred");
               setListMinimized(false);
             }}
           >
+            <span className="studio-dot dot-finished" />
             <span>Starred</span>
-            <span className="nav-count">{starredCount}</span>
+            <span className="studio-nav-count">{starredCount}</span>
           </button>
           <button
             type="button"
-            className={`text-nav-btn${filter === "archived" ? " active" : ""}`}
+            className={`studio-nav-btn${filter === "archived" ? " active" : ""}`}
             onClick={() => {
               setFilter("archived");
               setListMinimized(false);
             }}
           >
+            <span className="studio-dot dot-unopened" />
             <span>Archived</span>
-            <span className="nav-count">{archivedCount}</span>
-          </button>
-
-          <div className="rail-group-label">Books</div>
-          <button
-            type="button"
-            className="text-nav-btn"
-            onClick={() => navigate("#/books")}
-          >
-            <span>Bookshelf</span>
-          </button>
-          <button
-            type="button"
-            className="text-nav-btn"
-            onClick={() => navigate("#/stats")}
-          >
-            <span>Activity</span>
+            <span className="studio-nav-count">{archivedCount}</span>
           </button>
         </div>
 
-        <div className="typographic-rail-footer">
+        <div className="studio-rail-footer">
+          <NowReadingCard />
           <a
             className="bookmarklet"
             href={bookmarklet}
-            style={{ marginBottom: 8 }}
+            style={{ width: "100%", justifyContent: "center" }}
             title="Drag to your bookmarks bar to save any webpage in 1 click"
           >
             <Link2 size={13} />
@@ -303,7 +392,11 @@ export default function ArticlesList({
 
           <form className="add-article compact-add-article" onSubmit={submit}>
             <div className="search-shell add-article-input">
-              <Link2 size={14} />
+              {isUrlInput || !url.trim() ? (
+                <Link2 size={14} />
+              ) : (
+                <Search size={14} />
+              )}
               <input
                 type="text"
                 value={url}
@@ -311,14 +404,35 @@ export default function ArticlesList({
                   setUrl(e.target.value);
                   if (error) setError("");
                 }}
-                placeholder="Paste article link…"
-                aria-label="Article URL"
+                placeholder="Search articles or paste a link…"
+                aria-label="Search articles or paste a link to save"
               />
+              {url && (
+                <button
+                  type="button"
+                  className="studio-search-clear"
+                  onClick={() => {
+                    setUrl("");
+                    setError("");
+                  }}
+                  title="Clear"
+                  aria-label="Clear input"
+                >
+                  <X size={13} />
+                </button>
+              )}
             </div>
-            <button className="add-article-btn" type="submit">
-              <Plus size={14} />
-              Save
-            </button>
+            {(isUrlInput || !url.trim()) && (
+              <button
+                className="add-article-btn"
+                type="submit"
+                disabled={!isUrlInput}
+                title="Save link to Reading List"
+              >
+                <Plus size={14} />
+                Save
+              </button>
+            )}
           </form>
           {error && <p className="article-error">{error}</p>}
 

@@ -4,6 +4,12 @@
  * source of truth that the optional GitHub-Gist cross-device sync
  * (src/articleSync.ts) merges with.
  */
+export interface ArticleHighlight {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
 export interface SavedArticle {
   id: string;
   url: string;
@@ -18,6 +24,8 @@ export interface SavedArticle {
   archivedAt?: number | null;
   /** User tags, lowercase and trimmed. */
   tags?: string[];
+  /** Saved passage highlights inside this article. */
+  highlights?: ArticleHighlight[];
   /** Short plain-text excerpt from extracted markdown. */
   excerpt?: string;
   /** Estimated reading time in minutes (~220 wpm). */
@@ -67,6 +75,7 @@ function normalize(a: SavedArticle): SavedArticle {
     starredAt: a.starredAt ?? null,
     archivedAt: a.archivedAt ?? null,
     tags: Array.isArray(a.tags) ? a.tags : [],
+    highlights: Array.isArray(a.highlights) ? a.highlights : [],
     updatedAt: a.updatedAt ?? a.addedAt,
     removedAt: a.removedAt ?? null,
   };
@@ -408,5 +417,49 @@ export function setArticleProgress(id: string, progress: number): void {
           }
         : a
     )
+  );
+}
+
+/** Saves a highlighted text passage on an article (deduped by normalized text). */
+export function addArticleHighlight(
+  id: string,
+  rawText: string
+): ArticleHighlight | null {
+  const text = rawText.replace(/\s+/g, " ").trim();
+  if (text.length < 2) return null;
+  const now = Date.now();
+  let created: ArticleHighlight | null = null;
+  persist(
+    loadRawArticles().map((a) => {
+      if (a.id !== id) return a;
+      const existing = (a.highlights ?? []).find(
+        (h) => h.text.toLowerCase() === text.toLowerCase()
+      );
+      if (existing) {
+        created = existing;
+        return a;
+      }
+      created = { id: makeId(), text, createdAt: now };
+      return {
+        ...a,
+        highlights: [...(a.highlights ?? []), created],
+        updatedAt: now,
+      };
+    })
+  );
+  return created;
+}
+
+export function removeArticleHighlight(id: string, highlightId: string): void {
+  const now = Date.now();
+  persist(
+    loadRawArticles().map((a) => {
+      if (a.id !== id) return a;
+      return {
+        ...a,
+        highlights: (a.highlights ?? []).filter((h) => h.id !== highlightId),
+        updatedAt: now,
+      };
+    })
   );
 }

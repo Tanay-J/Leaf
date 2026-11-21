@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   Check,
+  Copy,
   ExternalLink,
+  Highlighter,
   Loader2,
   Maximize2,
   Minimize2,
@@ -11,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   Tag,
+  Trash2,
   X,
 } from "lucide-react";
 import { marked } from "marked";
@@ -18,14 +21,17 @@ import DOMPurify from "dompurify";
 import {
   ARTICLES_CHANGED_EVENT,
   PREDEFINED_TAGS,
+  addArticleHighlight,
   formatTagLabel,
   getArticle,
   parseReaderResponse,
+  removeArticleHighlight,
   setArticleProgress,
   setArticleRead,
   setArticleTags,
   toggleArticleTag,
   updateArticleExtracted,
+  type ArticleHighlight,
   type SavedArticle,
 } from "../articles";
 import { fetchVaultArticleContent, syncArticleContent } from "../articleSync";
@@ -97,6 +103,61 @@ function loadSpacingId(): string {
 }
 
 /**
+ * Safely wraps saved highlight snippets inside text nodes of sanitized HTML
+ * with <mark class="article-inline-hl" data-hl-id="..."> so HTML tags/links
+ * are never corrupted.
+ */
+function injectHighlightsIntoHtml(
+  rawHtml: string,
+  highlights: ArticleHighlight[]
+): string {
+  if (!rawHtml || highlights.length === 0 || typeof document === "undefined") {
+    return rawHtml;
+  }
+  const container = document.createElement("div");
+  container.innerHTML = rawHtml;
+
+  for (const hl of highlights) {
+    const target = hl.text.trim();
+    if (target.length < 2) continue;
+    const lowerTarget = target.toLowerCase();
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    let current: Node | null = walker.nextNode();
+    while (current) {
+      if (
+        current.parentElement &&
+        !["MARK", "SCRIPT", "STYLE", "CODE", "PRE"].includes(
+          current.parentElement.tagName
+        )
+      ) {
+        textNodes.push(current as Text);
+      }
+      current = walker.nextNode();
+    }
+    for (const node of textNodes) {
+      const val = node.nodeValue ?? "";
+      const idx = val.toLowerCase().indexOf(lowerTarget);
+      if (idx === -1) continue;
+      const before = val.slice(0, idx);
+      const match = val.slice(idx, idx + target.length);
+      const after = val.slice(idx + target.length);
+      const mark = document.createElement("mark");
+      mark.className = "article-inline-hl";
+      mark.setAttribute("data-hl-id", hl.id);
+      mark.textContent = match;
+      const frag = document.createDocumentFragment();
+      if (before) frag.appendChild(document.createTextNode(before));
+      frag.appendChild(mark);
+      if (after) frag.appendChild(document.createTextNode(after));
+      node.parentNode?.replaceChild(frag, node);
+      break; // highlight first occurrence
+    }
+  }
+  return container.innerHTML;
+}
+
+/**
  * Reader mode for a saved link. Content comes from Jina Reader
  * (https://r.jina.ai/<url>) — free, CORS-enabled, returns clean markdown —
  * then is rendered as sanitized HTML. Sites that block extraction fall
@@ -121,34 +182,122 @@ export default function ArticleReader({
   const [wide, setWide] = useState<boolean>(loadWide);
   const [scrollPct, setScrollPct] = useState<number>(() => article.progress ?? 0);
   const [tags, setTags] = useState<string[]>(() => article.tags ?? []);
+  const [highlights, setHighlights] = useState<ArticleHighlight[]>(
+    () => article.highlights ?? []
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [hlOpen, setHlOpen] = useState(false);
+  const [copiedHl, setCopiedHl] = useState(false);
+  const [pendingSel, setPendingSel] = useState<string | null>(null);
   const [customTag, setCustomTag] = useState("");
   const pickerRef = useRef<HTMLDivElement>(null);
+  const hlMenuRef = useRef<HTMLDivElement>(null);
+  const proseRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setTags(article.tags ?? []);
+    setHighlights(article.highlights ?? []);
     setScrollPct(article.progress ?? 0);
-  }, [article.id, article.tags, article.progress]);
+    setPendingSel(null);
+  }, [article.id, article.tags, article.highlights, article.progress]);
 
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!pickerOpen && !hlOpen) return;
     const onDocClick = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      if (
+        pickerOpen &&
+        pickerRef.current &&
+        !pickerRef.current.contains(e.target as Node)
+      ) {
         setPickerOpen(false);
+      }
+      if (
+        hlOpen &&
+        hlMenuRef.current &&
+        !hlMenuRef.current.contains(e.target as Node)
+      ) {
+        setHlOpen(false);
       }
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
-  }, [pickerOpen]);
+  }, [pickerOpen, hlOpen]);
 
   useEffect(() => {
     const onArticles = () => {
       const fresh = getArticle(article.id);
-      if (fresh) setTags(fresh.tags ?? []);
+      if (fresh) {
+        setTags(fresh.tags ?? []);
+        setHighlights(fresh.highlights ?? []);
+      }
     };
     window.addEventListener(ARTICLES_CHANGED_EVENT, onArticles);
     return () => window.removeEventListener(ARTICLES_CHANGED_EVENT, onArticles);
   }, [article.id]);
+
+  const highlightedHtml = useMemo(
+    () => injectHighlightsIntoHtml(html, highlights),
+    [html, highlights]
+  );
+
+  const checkSelection = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) {
+      setPendingSel(null);
+      return;
+    }
+    const text = sel.toString().replace(/\s+/g, " ").trim();
+    if (text.length < 3) {
+      setPendingSel(null);
+      return;
+    }
+    const anchor = sel.anchorNode;
+    if (anchor && proseRef.current && proseRef.current.contains(anchor)) {
+      setPendingSel(text);
+    } else {
+      setPendingSel(null);
+    }
+  };
+
+  const saveSelectedHighlight = () => {
+    if (!pendingSel) return;
+    addArticleHighlight(article.id, pendingSel);
+    window.getSelection()?.removeAllRanges();
+    setPendingSel(null);
+  };
+
+  const copySelectedText = () => {
+    if (!pendingSel) return;
+    void navigator.clipboard?.writeText(pendingSel);
+    window.getSelection()?.removeAllRanges();
+    setPendingSel(null);
+  };
+
+  const jumpToHighlight = (id: string) => {
+    const mark = proseRef.current?.querySelector(`[data-hl-id="${id}"]`);
+    if (mark) {
+      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHlOpen(false);
+    }
+  };
+
+  const copyHighlightsMarkdown = () => {
+    const pageTitle = fetchedTitle ?? article.title;
+    const lines = [
+      `# ${pageTitle}`,
+      `*Source: [${article.domain || article.url}](${article.url})*`,
+      "",
+      "## Highlights",
+      "",
+    ];
+    for (const h of highlights) {
+      lines.push(`> “${h.text}”`, "");
+    }
+    void navigator.clipboard?.writeText(lines.join("\n")).then(() => {
+      setCopiedHl(true);
+      window.setTimeout(() => setCopiedHl(false), 1800);
+    });
+  };
 
   const handleToggleTag = (tagId: string) => {
     toggleArticleTag(article.id, tagId);
@@ -361,6 +510,79 @@ export default function ArticleReader({
           </span>
         </div>
         <div className="topbar-actions">
+          <div className="reader-tag-menu-wrap" ref={hlMenuRef}>
+            <button
+              type="button"
+              className={`icon-btn reader-tag-btn${highlights.length > 0 || hlOpen ? " active" : ""}`}
+              onClick={() => setHlOpen((o) => !o)}
+              title="Article highlights & notes"
+              aria-label="Article highlights"
+            >
+              <Highlighter size={14} />
+              {highlights.length > 0 && (
+                <span className="reader-tag-count">{highlights.length}</span>
+              )}
+            </button>
+            {hlOpen && (
+              <div
+                className="reader-tag-dropdown article-hl-dropdown"
+                role="dialog"
+                aria-label="Article highlights"
+              >
+                <div className="reader-tag-dropdown-head">
+                  <strong>Highlights ({highlights.length})</strong>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {highlights.length > 0 && (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={copyHighlightsMarkdown}
+                        title="Copy all highlights as Markdown"
+                      >
+                        {copiedHl ? <Check size={12} /> : <Copy size={12} />}
+                        {copiedHl ? "Copied" : "Markdown"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="mini-btn"
+                      onClick={() => setHlOpen(false)}
+                      aria-label="Close highlights menu"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+                {highlights.length === 0 ? (
+                  <p className="inspector-empty-notes" style={{ margin: 0 }}>
+                    Select any text inside the article to highlight key passages.
+                  </p>
+                ) : (
+                  <div className="article-hl-list">
+                    {highlights.map((h) => (
+                      <div key={h.id} className="inspector-note-card">
+                        <button
+                          type="button"
+                          className="inspector-note-jump"
+                          onClick={() => jumpToHighlight(h.id)}
+                        >
+                          <blockquote>“{h.text}”</blockquote>
+                        </button>
+                        <button
+                          type="button"
+                          className="note-del-btn"
+                          onClick={() => removeArticleHighlight(article.id, h.id)}
+                          title="Delete highlight"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <div className="reader-tag-menu-wrap" ref={pickerRef}>
             <button
               type="button"
@@ -490,6 +712,41 @@ export default function ArticleReader({
         )}
         {status === "ready" && (
           <div className="article-scroll" ref={scrollRef}>
+            {pendingSel && (
+              <div
+                className="epub-selection-bar article-selection-bar"
+                role="toolbar"
+                aria-label="Text selection actions"
+              >
+                <button
+                  type="button"
+                  className="selection-action-btn primary"
+                  onClick={saveSelectedHighlight}
+                >
+                  <Highlighter size={13} />
+                  Highlight
+                </button>
+                <button
+                  type="button"
+                  className="selection-action-btn"
+                  onClick={copySelectedText}
+                >
+                  <Copy size={13} />
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  className="selection-action-btn"
+                  onClick={() => {
+                    window.getSelection()?.removeAllRanges();
+                    setPendingSel(null);
+                  }}
+                  aria-label="Dismiss"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
             <article className={`article-sheet${wide ? " wide" : ""}`}>
               {tags.length > 0 && (
                 <div className="article-sheet-tags">
@@ -515,14 +772,56 @@ export default function ArticleReader({
                 </div>
               )}
               <div
+                ref={proseRef}
                 className="article-prose"
+                onMouseUp={checkSelection}
+                onKeyUp={checkSelection}
+                onTouchEnd={checkSelection}
                 style={{
                   fontSize: `${font}%`,
                   fontFamily: fontStackFor(fontFamily),
                   lineHeight: spacingValueFor(spacingId) ?? ARTICLE_DEFAULT_LINE_HEIGHT,
                 }}
-                dangerouslySetInnerHTML={{ __html: html }}
+                dangerouslySetInnerHTML={{ __html: highlightedHtml }}
               />
+              {highlights.length > 0 && (
+                <section className="article-highlights-footer">
+                  <div className="inspector-notes-head">
+                    <span className="studio-nav-label">
+                      Saved Highlights ({highlights.length})
+                    </span>
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={copyHighlightsMarkdown}
+                    >
+                      {copiedHl ? <Check size={12} /> : <Copy size={12} />}
+                      {copiedHl ? "Copied Markdown" : "Copy as Markdown"}
+                    </button>
+                  </div>
+                  <div className="inspector-notes-list">
+                    {highlights.map((h) => (
+                      <div key={h.id} className="inspector-note-card">
+                        <button
+                          type="button"
+                          className="inspector-note-jump"
+                          onClick={() => jumpToHighlight(h.id)}
+                        >
+                          <blockquote>“{h.text}”</blockquote>
+                        </button>
+                        <button
+                          type="button"
+                          className="note-del-btn"
+                          onClick={() => removeArticleHighlight(article.id, h.id)}
+                          title="Delete highlight"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
               <p className="article-source">
                 Source:{" "}
                 <a href={article.url} target="_blank" rel="noopener noreferrer">

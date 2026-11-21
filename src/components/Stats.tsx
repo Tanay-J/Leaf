@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, BookOpen, Flame } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  Compass,
+  Flame,
+  Newspaper,
+} from "lucide-react";
+import { loadArticles, ARTICLES_CHANGED_EVENT } from "../articles";
+import { getCatalog } from "../books";
 import {
   loadAllProgress,
   navigate,
@@ -8,6 +16,9 @@ import {
   READING_TIME_EVENT,
   type Theme,
 } from "../lib";
+import { getMyLibrary, USER_BOOKS_CHANGED_EVENT } from "../userBooks";
+import NowReadingCard from "./NowReadingCard";
+import SyncCard from "./SyncCard";
 import ThemeButton from "./ThemeButton";
 
 interface Props {
@@ -52,7 +63,13 @@ export default function Stats({ theme, onCycleTheme }: Props) {
   useEffect(() => {
     const onTime = () => setTick((t) => t + 1);
     window.addEventListener(READING_TIME_EVENT, onTime);
-    return () => window.removeEventListener(READING_TIME_EVENT, onTime);
+    window.addEventListener(USER_BOOKS_CHANGED_EVENT, onTime);
+    window.addEventListener(ARTICLES_CHANGED_EVENT, onTime);
+    return () => {
+      window.removeEventListener(READING_TIME_EVENT, onTime);
+      window.removeEventListener(USER_BOOKS_CHANGED_EVENT, onTime);
+      window.removeEventListener(ARTICLES_CHANGED_EVENT, onTime);
+    };
   }, []);
 
   const stats = useMemo(() => {
@@ -140,94 +157,182 @@ export default function Stats({ theme, onCycleTheme }: Props) {
     return out;
   }, [stats.cells]);
 
+  const myBooksCount = useMemo(() => getMyLibrary().length, [tick]);
+  const catalogCount = useMemo(() => getCatalog().length, [tick]);
+  const unreadArticles = useMemo(
+    () => loadArticles().filter((a) => !a.archivedAt && !a.readAt).length,
+    [tick]
+  );
+
   return (
-    <div className="library">
-      <header className="topbar">
-        <div className="topbar-actions">
-          <button className="secondary-action" onClick={() => navigate("#/")}>
-            <ArrowLeft size={15} />
-            Articles
-          </button>
-          <button className="secondary-action" onClick={() => navigate("#/books")}>
-            <BookOpen size={15} />
-            Bookshelf
-          </button>
-        </div>
-        <div className="reader-title">
-          <strong>Reading stats</strong>
-        </div>
-        <div className="topbar-actions">
-          <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
-        </div>
-      </header>
-
-      <main className="content stats-page">
-        <div className="stat-cards">
-          <div className="stat-card">
-            <Flame size={16} aria-hidden />
-            <strong>{stats.current}</strong>
-            <span>day streak now</span>
-          </div>
-          <div className="stat-card">
-            <strong>{stats.longest}</strong>
-            <span>longest streak</span>
-          </div>
-          <div className="stat-card">
-            <strong>{fmtMinutes(stats.weekSeconds)}</strong>
-            <span>read this week</span>
-          </div>
-          <div className="stat-card">
-            <strong>{fmtMinutes(stats.totalSeconds)}</strong>
-            <span>all-time reading</span>
-          </div>
-          <div className="stat-card">
-            <BookOpen size={16} aria-hidden />
-            <strong>{stats.finished}</strong>
-            <span>finished · {stats.inProgress} in progress</span>
-          </div>
-        </div>
-
-        <section className="stat-section">
-          <h3>Last six months</h3>
-          <div className="heatmap-scroll">
-            <div className="heatmap">
-              <div className="heatmap-months">
-                {months.map((m) => (
-                  <span
-                    key={`${m.label}-${m.col}`}
-                    style={{ gridColumn: m.col + 1 }}
-                  >
-                    {m.label}
-                  </span>
-                ))}
+    <div className="library studio-library">
+      <div className="stats-studio-shell">
+        <aside className="studio-rail">
+          <div
+            className="studio-brand"
+            style={{ justifyContent: "space-between" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="brand-mark">
+                <BookOpen size={18} />
               </div>
-              <div className="heatmap-grid">
-                {stats.cells.map((c) => (
-                  <span
-                    key={c.key}
-                    className={`heat-cell heat-${c.level}`}
-                    title={`${c.key}${
-                      c.mins >= 1 ? ` · ${Math.round(c.mins)} min` : ""
-                    }`}
-                  />
-                ))}
+              <div className="brand-text">
+                <span className="eyebrow">Personal Reader</span>
+                <h1>Leaf</h1>
               </div>
             </div>
+            <ThemeButton theme={theme} onCycleTheme={onCycleTheme} />
           </div>
-          <p className="heatmap-legend">
-            less
-            {[0, 1, 2, 3, 4].map((l) => (
-              <span key={l} className={`heat-cell heat-${l}`} />
-            ))}
-            more
-          </p>
-        </section>
 
-        <p className="footnote">
-          Reading time accumulates while a book is open in the foreground, and
-          syncs across your devices when Sync &amp; Backup is connected.
-        </p>
-      </main>
+          <div className="studio-nav-group">
+            <span className="studio-nav-label">Workspace</span>
+            <button
+              type="button"
+              className="studio-nav-btn"
+              onClick={() => navigate("#/books")}
+            >
+              <BookOpen size={15} />
+              <span>My Shelf</span>
+              <span className="studio-nav-count">{myBooksCount}</span>
+            </button>
+            <button
+              type="button"
+              className="studio-nav-btn"
+              onClick={() => navigate("#/books?tab=browse")}
+            >
+              <Compass size={15} />
+              <span>Browse Catalog</span>
+              <span className="studio-nav-count">{catalogCount}</span>
+            </button>
+            <button
+              type="button"
+              className="studio-nav-btn"
+              onClick={() => navigate("#/articles")}
+            >
+              <Newspaper size={15} />
+              <span>Reading List</span>
+              {unreadArticles > 0 && (
+                <span className="studio-nav-count accent">{unreadArticles}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              className="studio-nav-btn active"
+              onClick={() => navigate("#/stats")}
+            >
+              <Activity size={15} />
+              <span>Activity &amp; Stats</span>
+              {stats.current > 0 && (
+                <span className="studio-nav-count">🔥 {stats.current}d</span>
+              )}
+            </button>
+          </div>
+
+          <div className="studio-rail-footer">
+            <NowReadingCard />
+            <SyncCard />
+          </div>
+        </aside>
+
+        <div className="studio-center">
+          <div className="studio-mobile-bar">
+            <div className="studio-mobile-tabs">
+              <button
+                type="button"
+                className="filter-chip"
+                onClick={() => navigate("#/books")}
+              >
+                My Shelf ({myBooksCount})
+              </button>
+              <button
+                type="button"
+                className="filter-chip"
+                onClick={() => navigate("#/books?tab=browse")}
+              >
+                Catalog ({catalogCount})
+              </button>
+              <button
+                type="button"
+                className="filter-chip"
+                onClick={() => navigate("#/articles")}
+              >
+                Articles{unreadArticles > 0 ? ` (${unreadArticles})` : ""}
+              </button>
+              <button type="button" className="filter-chip active">
+                Stats
+              </button>
+            </div>
+          </div>
+
+          <main className="content stats-page">
+            <div className="stat-cards">
+              <div className="stat-card">
+                <Flame size={16} aria-hidden />
+                <strong>{stats.current}</strong>
+                <span>day streak now</span>
+              </div>
+              <div className="stat-card">
+                <strong>{stats.longest}</strong>
+                <span>longest streak</span>
+              </div>
+              <div className="stat-card">
+                <strong>{fmtMinutes(stats.weekSeconds)}</strong>
+                <span>read this week</span>
+              </div>
+              <div className="stat-card">
+                <strong>{fmtMinutes(stats.totalSeconds)}</strong>
+                <span>all-time reading</span>
+              </div>
+              <div className="stat-card">
+                <BookOpen size={16} aria-hidden />
+                <strong>{stats.finished}</strong>
+                <span>finished · {stats.inProgress} in progress</span>
+              </div>
+            </div>
+
+            <section className="stat-section">
+              <h3>Last six months</h3>
+              <div className="heatmap-scroll">
+                <div className="heatmap">
+                  <div className="heatmap-months">
+                    {months.map((m) => (
+                      <span
+                        key={`${m.label}-${m.col}`}
+                        style={{ gridColumn: m.col + 1 }}
+                      >
+                        {m.label}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="heatmap-grid">
+                    {stats.cells.map((c) => (
+                      <span
+                        key={c.key}
+                        className={`heat-cell heat-${c.level}`}
+                        title={`${c.key}${
+                          c.mins >= 1 ? ` · ${Math.round(c.mins)} min` : ""
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <p className="heatmap-legend">
+                less
+                {[0, 1, 2, 3, 4].map((l) => (
+                  <span key={l} className={`heat-cell heat-${l}`} />
+                ))}
+                more
+              </p>
+            </section>
+
+            <p className="footnote">
+              Reading time accumulates while a book is open in the foreground, and
+              syncs across your devices when Sync &amp; Backup is connected.
+            </p>
+          </main>
+        </div>
+      </div>
     </div>
   );
 }

@@ -304,6 +304,7 @@ function mergePair(l: SavedArticle, r: SavedArticle): SavedArticle {
     starredAt: winner.starredAt ?? null,
     archivedAt: winner.archivedAt ?? null,
     tags: winner.tags ?? [],
+    highlights: winner.highlights ?? [],
     ...(winner.excerpt || l.excerpt || r.excerpt
       ? { excerpt: winner.excerpt ?? l.excerpt ?? r.excerpt }
       : {}),

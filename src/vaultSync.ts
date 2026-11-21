@@ -22,11 +22,11 @@
  */
 
 import {
+  decryptTextWithKey,
   fetchAndDecryptAsset,
   getStoredPassphrase,
   PassphraseRequiredError,
   setStoredPassphrase,
-  sha256Hex,
   WrongPassphraseError,
 } from "./bookCrypto";
 
@@ -633,11 +633,38 @@ export async function connectProfile(input: {
     if (!boot.ok) return boot;
   }
 
-  // 2. Derive deterministic profileId from name + PIN
+  // 2. Verify PIN against existing profile on the sync branch (if already created),
+  //    or create a new profile for this Name on first use.
   const cleanName =
     name.toLowerCase().replace(/[^a-z0-9_-]/g, "") || "reader";
-  const digest = await sha256Hex(`leaf-profile:${cleanName}:${pin}`);
-  const profileId = `${cleanName}-${digest.slice(0, 12)}`;
+  const profileId = cleanName;
+  const secret = `leaf-profile:${cleanName}:${pin}`;
+
+  try {
+    const existing = await getVaultText(
+      `profiles/${profileId}/state.json`,
+      "sync"
+    );
+    if (existing?.content) {
+      const outer = JSON.parse(existing.content) as {
+        encrypted?: number;
+        data?: string;
+      };
+      if (outer?.encrypted === 1 && typeof outer.data === "string") {
+        try {
+          await decryptTextWithKey(outer.data, secret);
+        } catch {
+          return {
+            ok: false,
+            error: `Wrong PIN for "${name}" — please check your PIN and try again.`,
+          };
+        }
+      }
+    }
+  } catch {
+    // 404 or sync branch doesn't exist yet — first time setting PIN for this Name
+  }
+
   const nextProfile: SyncProfile = { name, pin, profileId };
   writeProfile(nextProfile);
   if (config) {

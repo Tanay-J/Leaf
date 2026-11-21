@@ -1063,11 +1063,13 @@ html.dark-theme .book-list-icon {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 100;
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(2, 6, 23, 0.5);
+  background: rgba(20, 15, 10, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .modal {
@@ -1098,6 +1100,7 @@ html.dark-theme .book-list-icon {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .field > span {
@@ -1108,6 +1111,9 @@ html.dark-theme .book-list-icon {
 
 .field input,
 .field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 9px 12px;
   border: 1px solid var(--border-color);
   border-radius: 9px;
@@ -1125,10 +1131,13 @@ html.dark-theme .book-list-icon {
 .field-row {
   display: flex;
   gap: 12px;
+  width: 100%;
+  min-width: 0;
 }
 
 .field-row .field {
-  flex: 1;
+  flex: 1 1 0%;
+  min-width: 0;
 }
 
 .field-type {

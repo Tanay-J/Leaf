@@ -38,7 +38,9 @@ export async function loadBook(book: LoadableBook): Promise<ArrayBuffer> {
     return buf;
   }
   if (!book.url) {
-    throw new Error("This book has no file to open.");
+    throw new Error(
+      "This book's file is stored on another device. Drop or pick the EPUB/PDF file on your shelf to read it here."
+    );
   }
   if (/^https?:\/\//i.test(book.url) && !/\.enc($|\?)/i.test(book.url)) {
     const res = await fetch(book.url);

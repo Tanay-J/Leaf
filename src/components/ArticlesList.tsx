@@ -6,11 +6,9 @@ import {
   Link2,
   Newspaper,
   Plus,
-  RefreshCw,
   Star,
   Tag,
   Trash2,
-  Unplug,
   X,
 } from "lucide-react";
 import {
@@ -26,18 +24,10 @@ import {
   toggleArticleTag,
   type SavedArticle,
 } from "../articles";
-import {
-  extractAndSyncArticle,
-  getSyncStatus,
-  syncConnect,
-  syncConnectViaVault,
-  syncDisconnect,
-  syncNow,
-  type SyncStatus,
-} from "../articleSync";
-import { isVaultConnected } from "../vaultSync";
+import { extractAndSyncArticle } from "../articleSync";
 import { navigate, type Theme } from "../lib";
 import ArticleReader from "./ArticleReader";
+import SyncCard from "./SyncCard";
 import ThemeButton from "./ThemeButton";
 
 interface Props {
@@ -143,60 +133,13 @@ export default function ArticlesList({
     setTagDraft("");
   };
 
-  /* Sync panel state: mirrors getSyncStatus() via the window event. */
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() => getSyncStatus());
-  const [token, setToken] = useState("");
-  const [syncBusy, setSyncBusy] = useState(false);
-  const [connectError, setConnectError] = useState("");
-
   useEffect(() => {
-    const onStatus = (e: Event) =>
-      setSyncStatus({ ...(e as CustomEvent<SyncStatus>).detail });
     const onArticles = () => setArticles(loadArticles());
-    window.addEventListener("leaf:sync-status", onStatus);
     window.addEventListener(ARTICLES_CHANGED_EVENT, onArticles);
     return () => {
-      window.removeEventListener("leaf:sync-status", onStatus);
       window.removeEventListener(ARTICLES_CHANGED_EVENT, onArticles);
     };
   }, []);
-
-  const connect = async () => {
-    setSyncBusy(true);
-    setConnectError("");
-    const res = await syncConnect(token);
-    if (!res.ok) {
-      setConnectError(res.error);
-    } else {
-      setToken("");
-      setArticles(loadArticles());
-    }
-    setSyncBusy(false);
-  };
-
-  const connectViaVault = async () => {
-    setSyncBusy(true);
-    setConnectError("");
-    const res = await syncConnectViaVault();
-    if (!res.ok) {
-      setConnectError(res.error);
-    } else {
-      setArticles(loadArticles());
-    }
-    setSyncBusy(false);
-  };
-
-  const manualSync = async () => {
-    setSyncBusy(true);
-    await syncNow();
-    setArticles(loadArticles());
-    setSyncBusy(false);
-  };
-
-  const disconnect = () => {
-    syncDisconnect();
-    setConnectError("");
-  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -291,85 +234,16 @@ export default function ArticlesList({
         </div>
 
         <div className="typographic-rail-footer">
-          <div className="sync-status-mini">
-            <span
-              className={`sync-dot sync-dot-${syncStatus.state}`}
-              aria-hidden
-            />
-            <span>
-              {syncStatus.state === "disconnected"
-                ? "Local only"
-                : syncStatus.backend === "vault"
-                  ? "Vault synced"
-                  : "Gist synced"}
-            </span>
-            {syncStatus.state !== "disconnected" && (
-              <button
-                type="button"
-                className="mini-btn"
-                onClick={() => void manualSync()}
-                disabled={syncBusy}
-                title="Sync now"
-              >
-                <RefreshCw size={12} />
-              </button>
-            )}
-          </div>
-          {syncStatus.state === "disconnected" && isVaultConnected() && (
-            <button
-              type="button"
-              className="secondary-action"
-              onClick={() => void connectViaVault()}
-              disabled={syncBusy}
-              style={{ width: "100%", justifyContent: "center", marginTop: 6 }}
-            >
-              {syncBusy ? "Connecting…" : "Enable Vault Sync"}
-            </button>
-          )}
-          <details className="rail-sync-details">
-            <summary>Bookmarklet &amp; Sync</summary>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-              <a className="bookmarklet" href={bookmarklet}>
-                <Link2 size={13} />
-                Save to Leaf
-              </a>
-              {syncStatus.state === "disconnected" ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void connect();
-                  }}
-                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                >
-                  <input
-                    type="password"
-                    className="sync-token-input"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="Gist token (optional)"
-                    aria-label="GitHub token"
-                  />
-                  <button
-                    className="secondary-action"
-                    type="submit"
-                    disabled={syncBusy}
-                  >
-                    {syncBusy ? "Connecting…" : "Connect Gist"}
-                  </button>
-                  {connectError && <p className="article-error">{connectError}</p>}
-                </form>
-              ) : (
-                <button
-                  type="button"
-                  className="secondary-action"
-                  onClick={disconnect}
-                >
-                  <Unplug size={13} />
-                  Disconnect sync
-                </button>
-              )}
-            </div>
-          </details>
+          <a
+            className="bookmarklet"
+            href={bookmarklet}
+            style={{ marginBottom: 8 }}
+            title="Drag to your bookmarks bar to save any webpage in 1 click"
+          >
+            <Link2 size={13} />
+            Save to Leaf
+          </a>
+          <SyncCard />
         </div>
       </aside>
 

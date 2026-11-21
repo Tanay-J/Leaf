@@ -225,7 +225,7 @@ export default function Stats({ theme, onCycleTheme }: Props) {
 
         <p className="footnote">
           Reading time accumulates while a book is open in the foreground, and
-          syncs with your progress when the vault is connected.
+          syncs across your devices when Sync &amp; Backup is connected.
         </p>
       </main>
     </div>

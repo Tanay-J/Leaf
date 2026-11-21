@@ -38,17 +38,26 @@ import {
   type UserBook,
 } from "./userBooks";
 import { CATALOG_LOADED_EVENT, getCatalog } from "./books";
+import { decryptTextWithKey, encryptTextWithKey } from "./bookCrypto";
 import {
   ensureVaultBranch,
+  getProfileEncryptionSecret,
+  getSyncProfile,
   getVaultText,
   isVaultConnected,
   putVaultText,
+  VAULT_STATUS_EVENT,
   VaultConflictError,
   VaultMissingRefError,
 } from "./vaultSync";
 
 const STATE_PATH = "state/leaf-state.json";
 const SYNC_BRANCH = "sync";
+
+function activeStatePath(): string {
+  const prof = getSyncProfile();
+  return prof ? `profiles/${prof.profileId}/state.json` : STATE_PATH;
+}
 /** 2: adds readSeconds (per-day reading time). Schema-1 payloads still load.
  *  3: pins carry the book metadata (title/author/type/url/cover) so a fresh
  *     device can materialise My library from the vault alone. */
@@ -188,9 +197,9 @@ function buildLocalProgress(): Record<string, ProgressRecord> {
 function buildLocalPins(): Record<string, PinRecord> {
   const out: Record<string, PinRecord> = {};
   for (const b of loadAllPins()) {
-    // Device-local books (file lives in this browser's IndexedDB) can't
-    // follow the pin — skip them so an empty url never syncs.
-    if (b.blobKey || !b.url) continue;
+    // Sync metadata & progress for ALL books on the user's shelf — including
+    // device-local books — so the user can see what they are reading and
+    // their reading stats across every device.
     out[b.id] = {
       addedAt: b.addedAt,
       pinnedAt: b.pinnedAt ?? b.addedAt,
@@ -435,6 +444,8 @@ function applyState(merged: StatePayload): void {
         if (remoteNewer && rec.author !== undefined) {
           existing.author = rec.author || undefined;
         }
+        if (!existing.url && rec.url) existing.url = rec.url;
+        if (!existing.cover && rec.cover) existing.cover = rec.cover;
         existing.pinnedAt = rec.pinnedAt ?? existing.addedAt;
         existing.removedAt = rec.removedAt;
         existing.updatedAt = Math.max(existing.updatedAt ?? 0, rec.updatedAt ?? 0);
@@ -457,21 +468,30 @@ function applyState(merged: StatePayload): void {
  *  from the record's own metadata (schema 3), falling back to the published
  *  catalog for payloads written by older builds. */
 function materializePin(id: string, rec: PinRecord): UserBook | null {
-  if (rec.title && rec.type && rec.url) {
+  const cat =
+    getCatalog().find((b) => b.id === id) ??
+    (rec.title
+      ? getCatalog().find(
+          (b) =>
+            b.title.toLowerCase() === rec.title!.toLowerCase() &&
+            (!rec.type || b.type === rec.type)
+        )
+      : undefined);
+
+  if (rec.title && rec.type) {
     return {
       id,
       title: rec.title,
       type: rec.type,
-      url: rec.url,
-      ...(rec.author ? { author: rec.author } : {}),
-      ...(rec.cover ? { cover: rec.cover } : {}),
+      url: rec.url || cat?.url || "",
+      ...(rec.author || cat?.author ? { author: rec.author ?? cat?.author } : {}),
+      ...(rec.cover || cat?.cover ? { cover: rec.cover ?? cat?.cover } : {}),
       addedAt: rec.addedAt,
       pinnedAt: rec.pinnedAt ?? rec.addedAt,
       removedAt: rec.removedAt ?? null,
       updatedAt: rec.updatedAt ?? rec.addedAt,
     };
   }
-  const cat = getCatalog().find((b) => b.id === id);
   if (!cat) return null;
   return {
     ...cat,
@@ -485,14 +505,22 @@ function materializePin(id: string, rec: PinRecord): UserBook | null {
 /* ---------- pull / push ---------- */
 
 async function pullRemoteState(): Promise<StatePayload | null> {
-  const entry = await getVaultText(STATE_PATH, SYNC_BRANCH);
+  const path = activeStatePath();
+  const entry = await getVaultText(path, SYNC_BRANCH);
   vaultSha = entry?.sha ?? null;
   if (!entry?.content) return null;
   try {
-    const data = JSON.parse(entry.content) as Partial<StatePayload>;
-    // Schema 2 = +readSeconds; schema 1 payloads simply have none. Schema 3
-    // additionally packs book metadata into pin records (pins without it
-    // still resolve against the catalog — see materializePin).
+    let rawJson = entry.content;
+    const outer = JSON.parse(rawJson) as {
+      encrypted?: number;
+      data?: string;
+    };
+    if (outer && outer.encrypted === 1 && typeof outer.data === "string") {
+      const secret = getProfileEncryptionSecret();
+      if (!secret) return null;
+      rawJson = await decryptTextWithKey(outer.data, secret);
+    }
+    const data = JSON.parse(rawJson) as Partial<StatePayload>;
     if (!data || (data.schema !== 1 && data.schema !== 2 && data.schema !== SCHEMA)) {
       return null;
     }
@@ -503,16 +531,29 @@ async function pullRemoteState(): Promise<StatePayload | null> {
       readDays: data.readDays ?? {},
       readSeconds: data.readSeconds ?? {},
       bookSeconds: data.bookSeconds ?? {},
+      ...(data.settings ? { settings: data.settings } : {}),
     };
   } catch {
     return null; // unreadable payload — start over with whatever local has
   }
 }
 
+async function serializeForRemote(plainJson: string): Promise<string> {
+  const secret = getProfileEncryptionSecret();
+  if (!secret) return plainJson;
+  const cipher = await encryptTextWithKey(plainJson, secret);
+  return JSON.stringify({ encrypted: 1, data: cipher });
+}
+
 async function pushState(): Promise<void> {
-  const message = "Sync reading state (Leaf)";
+  const path = activeStatePath();
+  const prof = getSyncProfile();
+  const message = prof
+    ? `Sync reading state for ${prof.name} (Leaf)`
+    : "Sync reading state (Leaf)";
+  const payload = await serializeForRemote(buildPayload(lastRemote));
   try {
-    vaultSha = await putVaultText(STATE_PATH, buildPayload(lastRemote), {
+    vaultSha = await putVaultText(path, payload, {
       ref: SYNC_BRANCH,
       message,
       ...(vaultSha ? { sha: vaultSha } : {}),
@@ -521,7 +562,7 @@ async function pushState(): Promise<void> {
     if (!(err instanceof VaultMissingRefError)) throw err;
     // First sync on this vault — bootstrap the branch and retry.
     await ensureVaultBranch(SYNC_BRANCH);
-    vaultSha = await putVaultText(STATE_PATH, buildPayload(lastRemote), {
+    vaultSha = await putVaultText(path, payload, {
       ref: SYNC_BRANCH,
       message,
     });
@@ -611,6 +652,15 @@ export function initStateSync(): void {
   window.addEventListener(PROGRESS_SAVED_EVENT, onStateChanged);
   window.addEventListener(USER_BOOKS_CHANGED_EVENT, onStateChanged);
   window.addEventListener(SETTINGS_CHANGED_EVENT, onStateChanged);
+  window.addEventListener(VAULT_STATUS_EVENT, () => {
+    vaultSha = null;
+    lastRemote = null;
+    if (isVaultConnected()) {
+      setStatus({ state: "connected", lastSyncedAt: status.lastSyncedAt });
+    } else {
+      setStatus({ state: "disconnected", lastSyncedAt: null });
+    }
+  });
   // A pin whose book wasn't known yet (fresh device, catalog still loading)
   // resolves the moment books/catalog.json arrives.
   window.addEventListener(CATALOG_LOADED_EVENT, () => {

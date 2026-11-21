@@ -49,6 +49,8 @@ jobs:
       - name: Publish encrypted library
         env:
           BOOKS_PASSPHRASE: ${{ secrets.BOOKS_PASSPHRASE }}
+          CONTENT_REPO: ${{ secrets.CONTENT_REPO }}
+          CONTENT_TOKEN: ${{ secrets.CONTENT_TOKEN }}
         run: |
           if [ ! -d content-source ]; then
             echo "::warning::Content source unavailable (missing CONTENT_REPO or CONTENT_TOKEN) — deploying WITHOUT the library."

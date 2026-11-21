@@ -342,6 +342,31 @@ await writeFile(
   `${JSON.stringify(catalog, null, 2)}\n`
 );
 
+/* ---- encrypted sync bootstrap (sync.enc) -------------------------------
+ * When CONTENT_REPO and CONTENT_TOKEN are available at deploy time, encrypt
+ * them with BOOKS_PASSPHRASE into sync.enc. Visitors who unlock the library
+ * with the passphrase can then sync their personal reading profile (Name + PIN)
+ * without ever having to generate or enter a GitHub token. */
+const syncRepo = (process.env.CONTENT_REPO ?? "").trim();
+const syncToken = (process.env.CONTENT_TOKEN ?? "").trim();
+if (syncRepo && syncToken) {
+  const payload = encoder.encode(
+    JSON.stringify({ repo: syncRepo, token: syncToken })
+  );
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveKey(salt);
+  const cipher = new Uint8Array(
+    await subtle.encrypt({ name: "AES-GCM", iv }, key, payload)
+  );
+  const blob = new Uint8Array(SALT_BYTES + IV_BYTES + cipher.length);
+  blob.set(salt, 0);
+  blob.set(iv, SALT_BYTES);
+  blob.set(cipher, SALT_BYTES + IV_BYTES);
+  await writeFile(path.join(outDir, "sync.enc"), blob);
+  console.log(`✔ sync.enc (${syncRepo}) → ${path.join(outDir, "sync.enc")}`);
+}
+
 console.log(`\nEncrypted ${entries.length} book(s) into ${outDir}`);
 console.log(
   `✔ catalog.json (${catalog.length} entries) → ${path.join(outDir, "catalog.json")}`

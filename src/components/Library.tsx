@@ -62,15 +62,14 @@ import {
   updateBookMeta,
   USER_BOOKS_CHANGED_EVENT,
   type BookType,
+  type UserBook,
 } from "../userBooks";
 import {
   canWatchDeploys,
   getVaultStatus,
+  tryBootstrapSyncEnc,
   uploadToVault,
   VAULT_STATUS_EVENT,
-  vaultConnect,
-  vaultDisconnect,
-  vaultEnableWatch,
   waitForDeploy,
   type VaultStatus,
 } from "../vaultSync";
@@ -281,7 +280,8 @@ export default function Library({ theme, onCycleTheme }: Props) {
 
   /* ---- "Add book" modal state ---- */
   const [showAdd, setShowAdd] = useState(false);
-  const [addTab, setAddTab] = useState<"device" | "vault" | "link">("device");
+  const [addTab, setAddTab] = useState<"device" | "link">("device");
+  const [alsoUploadToCloud, setAlsoUploadToCloud] = useState(false);
   const [addUrl, setAddUrl] = useState("");
   const [addTitle, setAddTitle] = useState("");
   const [addAuthor, setAddAuthor] = useState("");
@@ -291,8 +291,12 @@ export default function Library({ theme, onCycleTheme }: Props) {
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const attachFileRef = useRef<HTMLInputElement>(null);
 
-  const importLocalFiles = (files: File[]) => {
+  const importLocalFiles = (
+    files: File[],
+    options?: { uploadToCloud?: boolean; targetBookId?: string }
+  ) => {
     if (files.length === 0) return;
     setAddError("");
     setAddBusy(true);
@@ -303,7 +307,8 @@ export default function Library({ theme, onCycleTheme }: Props) {
         if (!/\.(epub|pdf)$/i.test(file.name)) continue;
         // Duplicate detection: identical content anywhere in the library?
         const sha = await hashBlob(file);
-        const dupKey = sha ? await findKeyBySha(sha) : null;
+        const dupKey =
+          !options?.targetBookId && sha ? await findKeyBySha(sha) : null;
         if (dupKey) {
           skipped++;
           continue; // already have it — skip in a batch
@@ -316,23 +321,32 @@ export default function Library({ theme, onCycleTheme }: Props) {
         const { book } = await addLocalBook(file, sha ?? undefined, {
           title: (files.length === 1 && addTitle.trim()) || meta?.title,
           author: (files.length === 1 && addAuthor.trim()) || meta?.author,
+          targetId: options?.targetBookId,
         });
         if (meta?.cover) await saveCover(book.id, meta.cover);
         added++;
       }
-      if (added === 0 && skipped === files.length) {
+      if (
+        added === 0 &&
+        skipped === files.length &&
+        !options?.uploadToCloud
+      ) {
         setAddError("Those files are already in your library.");
         return;
       }
-      if (added === 0 && files.length === 1) {
+      if (added === 0 && files.length === 1 && !options?.uploadToCloud) {
         setAddError("Could not add that file (only .epub and .pdf are supported).");
         return;
+      }
+      if (options?.uploadToCloud) {
+        await startVaultUploads(files);
+      } else {
+        setShowAdd(false);
       }
       setAddUrl("");
       setAddTitle("");
       setAddAuthor("");
       setAddType("epub");
-      setShowAdd(false);
       setTab("mine");
     })()
       .catch((err) => {
@@ -346,7 +360,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
   const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = ""; // allow re-picking the same files later
-    importLocalFiles(files);
+    importLocalFiles(files, { uploadToCloud: alsoUploadToCloud });
   };
 
   const onDragEnter = (e: DragEvent) => {
@@ -429,27 +443,14 @@ export default function Library({ theme, onCycleTheme }: Props) {
     else pinBook(book);
   };
 
-  /* ---- Vault upload ("reads on every device") state ---- */
+  /* ---- Optional Cloud Catalog upload state ---- */
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>(() =>
     getVaultStatus()
   );
-  const [showVaultSetup, setShowVaultSetup] = useState(false);
-  const [vaultToken, setVaultToken] = useState("");
-  const [vaultRepo, setVaultRepo] = useState("");
-  const [leafRepo, setLeafRepo] = useState("");
-  const [vaultLeafToken, setVaultLeafToken] = useState("");
-  const [vaultError, setVaultError] = useState("");
   const [vaultBusy, setVaultBusy] = useState(false);
   const [vaultNote, setVaultNote] = useState("");
   const [vaultPhase, setVaultPhase] = useState<"upload" | "deploy" | null>(null);
   const [vaultPct, setVaultPct] = useState(0);
-  const vaultFileRef = useRef<HTMLInputElement>(null);
-  const [showWatchSetup, setShowWatchSetup] = useState(false);
-  const [watchDone, setWatchDone] = useState(false);
-  const [watchLeafRepo, setWatchLeafRepo] = useState("");
-  const [watchToken, setWatchToken] = useState("");
-  const [watchError, setWatchError] = useState("");
-  const [watchBusy, setWatchBusy] = useState(false);
 
   /* Keep the connect/disconnect state in step with vaultSync. */
   useEffect(() => {
@@ -459,32 +460,11 @@ export default function Library({ theme, onCycleTheme }: Props) {
     return () => window.removeEventListener(VAULT_STATUS_EVENT, onVault);
   }, []);
 
-  const connectVault = async () => {
-    setVaultBusy(true);
-    setVaultError("");
-    const res = await vaultConnect({
-      token: vaultToken,
-      repo: vaultRepo,
-      leafRepo,
-      leafToken: vaultLeafToken,
-    });
-    if (res.ok) {
-      setVaultToken("");
-      setVaultLeafToken("");
-      setShowVaultSetup(false);
-    } else {
-      setVaultError(res.error);
-    }
-    setVaultBusy(false);
-  };
-
   /** Uploads one file to the vault without waiting on the deploy. */
   const uploadOneToVault = async (
     file: File,
     allowFieldOverride: boolean
   ): Promise<{ fileName: string; note: string; cover?: Blob } | null> => {
-    // Epub metadata prefill so vault uploads carry title/author for CI, with
-    // explicit Title/Author form fields overriding when uploading a single file.
     let title = allowFieldOverride ? addTitle.trim() : "";
     let author = allowFieldOverride ? addAuthor.trim() : "";
     let cover: Blob | undefined;
@@ -507,41 +487,44 @@ export default function Library({ theme, onCycleTheme }: Props) {
       note:
         (res.replaced
           ? `Replaced “${res.fileName}”.`
-          : `Uploaded “${res.fileName}”.`) +
+          : `Uploaded “${res.fileName}” to Cloud Catalog.`) +
         (res.metaWarning ? ` ${res.metaWarning}` : ""),
     };
   };
 
-  /** Uploads one or many files to the vault, waits for the deploy once, and
-   *  pins every book that shows up in the freshly-published catalog. */
+  /** Uploads one or many files to the cloud catalog repo. */
   const startVaultUploads = async (files: File[]) => {
     setAddError("");
     setVaultNote("");
-    setAddBusy(false);
     setVaultBusy(true);
     const deployStartedAt = Date.now();
     try {
+      if (vaultStatus.state !== "connected") {
+        const boot = await tryBootstrapSyncEnc();
+        if (!boot.ok) {
+          setVaultNote(
+            "Saved to your shelf! To also upload the file to the Cloud Catalog, connect Sync & Backup first."
+          );
+          return;
+        }
+      }
       setVaultPhase("upload");
       const uploaded: { fileName: string; note: string; cover?: Blob }[] = [];
       for (let i = 0; i < files.length; i++) {
         setVaultPct(0);
         if (files.length > 1) {
-          setVaultNote(`Uploading ${i + 1} of ${files.length} to the vault…`);
+          setVaultNote(`Uploading ${i + 1} of ${files.length} to Cloud Catalog…`);
         }
         const done = await uploadOneToVault(files[i], files.length === 1);
         if (done) uploaded.push(done);
       }
       if (uploaded.length === 0) {
         setVaultNote(
-          files.length > 1
-            ? "Those files are already in the vault (same name and size) — nothing to upload."
-            : "That file is already in the vault (same name and size) — nothing to upload."
+          "Saved to your shelf (file is already in the Cloud Catalog)."
         );
         return;
       }
 
-      // One deploy-watch for the whole batch, then a cache-busted catalog
-      // reload — the catalog is the source of truth for “is it live yet”.
       setVaultPhase("deploy");
       const note = uploaded.map((u) => u.note).join(" ");
       if (canWatchDeploys()) {
@@ -559,31 +542,22 @@ export default function Library({ theme, onCycleTheme }: Props) {
           if (cover) await saveCover(b.id, cover).catch(() => {});
         }
         if (arrived.length > 0) {
-          setTab("browse");
           setVaultNote(
-            `${note} ${arrived.length === 1 ? "It’s live and pinned" : "They’re live and pinned"} to My library.`
+            `${note} Live in Catalog and pinned to My Shelf.`
           );
           return;
         }
         if (watch.conclusion === "success") {
-          // Watch says done but the book isn't in the catalog yet — the CDN
-          // can briefly lag the payload; it'll show up (or on the next visit).
-          setVaultNote(note + " The deploy finished — the book appears under Browse shortly.");
+          setVaultNote(
+            note + " The deploy finished — it will appear in Catalog shortly."
+          );
           return;
         }
-        setVaultNote(
-          note +
-            (watch.conclusion
-              ? ` But the deploy failed (${watch.conclusion}) — check the Actions tab.`
-              : watch.error
-                ? ` ${watch.error}`
-                : " It appears under Browse once the deploy finishes (a few minutes).")
-        );
-      } else {
-        setVaultNote(
-          note + " It appears under Browse once the deploy finishes (a few minutes)."
-        );
       }
+      setVaultNote(
+        note +
+          " Added to My Shelf now; the full file will appear in Catalog after deploy."
+      );
     } catch (err) {
       setVaultNote(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -591,27 +565,6 @@ export default function Library({ theme, onCycleTheme }: Props) {
       setVaultPct(0);
       setVaultBusy(false);
     }
-  };
-
-  const onVaultFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = ""; // allow re-picking the same files later
-    if (files.length === 0) return;
-    void startVaultUploads(files);
-  };
-
-  const enableWatch = async () => {
-    setWatchBusy(true);
-    setWatchError("");
-    const res = await vaultEnableWatch(watchLeafRepo, watchToken);
-    if (res.ok) {
-      setWatchToken("");
-      setShowWatchSetup(false);
-      setWatchDone(true);
-    } else {
-      setWatchError(res.error);
-    }
-    setWatchBusy(false);
   };
 
   /* ---- 3-Pane Studio Inspector state ---- */
@@ -768,7 +721,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
               onClick={() => setTab("browse")}
             >
               <Compass size={15} />
-              <span>Browse Vault</span>
+              <span>Browse Catalog</span>
               <span className="studio-nav-count">{catalog.length}</span>
             </button>
             <button
@@ -847,7 +800,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
                 placeholder={
                   tab === "mine"
                     ? "Filter shelf by title or author…"
-                    : "Search vault catalog…"
+                    : "Search catalog…"
                 }
               />
               {query && (
@@ -930,7 +883,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
                 className={`filter-chip${tab === "browse" ? " active" : ""}`}
                 onClick={() => setTab("browse")}
               >
-                Vault ({catalog.length})
+                Catalog ({catalog.length})
               </button>
               <button
                 type="button"
@@ -1008,7 +961,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
                   {query.trim() !== ""
                     ? "No books match your search."
                     : tab === "mine"
-                      ? "Your shelf is empty — pin books from the vault or drop an EPUB/PDF anywhere."
+                      ? "Your shelf is empty — pin books from the catalog or drop an EPUB/PDF anywhere."
                       : "No books match your search."}
                 </p>
                 {tab === "mine" && query.trim() === "" && (
@@ -1019,7 +972,7 @@ export default function Library({ theme, onCycleTheme }: Props) {
                       onClick={() => setTab("browse")}
                     >
                       <Compass size={15} />
-                      Browse Vault Catalog
+                      Browse Catalog
                     </button>
                     <button
                       type="button"
@@ -1350,16 +1303,45 @@ export default function Library({ theme, onCycleTheme }: Props) {
                 </div>
 
                 <div className="inspector-cta-row">
-                  <button
-                    type="button"
-                    className="inspector-primary-btn"
-                    onClick={() =>
-                      navigate(`#/book/${encodeURIComponent(selectedBook.id)}`)
-                    }
-                  >
-                    <Play size={15} />
-                    {rawProg.lastReadAt ? "Resume Reading" : "Open in Reader"}
-                  </button>
+                  {!selectedBook.url && !(selectedBook as UserBook).blobKey ? (
+                    <>
+                      <button
+                        type="button"
+                        className="inspector-primary-btn"
+                        onClick={() => attachFileRef.current?.click()}
+                        title="Pick the EPUB/PDF file on this device to continue reading here"
+                      >
+                        <FolderOpen size={15} />
+                        Attach File on This Device
+                      </button>
+                      <input
+                        ref={attachFileRef}
+                        type="file"
+                        accept=".epub,.pdf"
+                        hidden
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files ?? []);
+                          e.target.value = "";
+                          if (files.length > 0) {
+                            importLocalFiles(files, {
+                              targetBookId: selectedBook.id,
+                            });
+                          }
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="inspector-primary-btn"
+                      onClick={() =>
+                        navigate(`#/book/${encodeURIComponent(selectedBook.id)}`)
+                      }
+                    >
+                      <Play size={15} />
+                      {rawProg.lastReadAt ? "Resume Reading" : "Open in Reader"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="secondary-action"
@@ -1576,19 +1558,6 @@ export default function Library({ theme, onCycleTheme }: Props) {
               <button
                 type="button"
                 role="tab"
-                aria-selected={addTab === "vault"}
-                className={`modal-tab${addTab === "vault" ? " active" : ""}`}
-                onClick={() => {
-                  setAddTab("vault");
-                  setAddError("");
-                }}
-              >
-                <CloudUpload size={14} />
-                To Vault
-              </button>
-              <button
-                type="button"
-                role="tab"
                 aria-selected={addTab === "link"}
                 className={`modal-tab${addTab === "link" ? " active" : ""}`}
                 onClick={() => {
@@ -1612,236 +1581,62 @@ export default function Library({ theme, onCycleTheme }: Props) {
                     onChange={onFilePicked}
                     disabled={addBusy || vaultBusy}
                   />
-                  <FolderOpen size={20} />
+                  {vaultPhase === "upload" || addBusy ? (
+                    <Loader2 className="spin" size={20} />
+                  ) : alsoUploadToCloud ? (
+                    <CloudUpload size={20} />
+                  ) : (
+                    <FolderOpen size={20} />
+                  )}
                   <span>
-                    {addBusy
-                      ? "Saving to this browser…"
-                      : "Choose EPUB or PDF files from this device"}
+                    {vaultPhase === "upload"
+                      ? `Uploading to Cloud Catalog (${vaultPct}%)…`
+                      : vaultPhase === "deploy"
+                        ? "Publishing to Cloud Catalog…"
+                        : addBusy
+                          ? "Adding to your shelf…"
+                          : "Choose EPUB or PDF files from this device"}
                   </span>
                   <small>Or drag and drop files anywhere on the library page</small>
                 </label>
-                <p className="modal-hint">
-                  Files you pick are stored in this browser only — nothing is
-                  uploaded. EPUB titles, authors, and covers are extracted
-                  automatically.
-                </p>
-              </>
-            )}
 
-            {addTab === "vault" && (
-              <>
-                <div className="field-row">
-                  <label className="field">
-                    <span>Title override (optional)</span>
-                    <input
-                      type="text"
-                      value={addTitle}
-                      onChange={(e) => setAddTitle(e.target.value)}
-                      placeholder="Auto from EPUB/filename if blank"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Author override (optional)</span>
-                    <input
-                      type="text"
-                      value={addAuthor}
-                      onChange={(e) => setAddAuthor(e.target.value)}
-                      placeholder="Author name"
-                    />
-                  </label>
-                </div>
-
-                {vaultStatus.state === "connected" ? (
-                  <>
-                    <label className="modal-file-btn modal-file-drop">
-                      <input
-                        ref={vaultFileRef}
-                        type="file"
-                        accept=".epub,.pdf"
-                        multiple
-                        onChange={onVaultFilePicked}
-                        disabled={vaultBusy || addBusy}
-                      />
-                      {vaultPhase === "upload" ? (
-                        <Loader2 className="spin" size={20} />
-                      ) : (
-                        <CloudUpload size={20} />
-                      )}
-                      <span>
-                        {vaultPhase === "upload"
-                          ? `Uploading ${vaultPct}%`
-                          : vaultPhase === "deploy"
-                            ? "Deploying…"
-                            : "Choose EPUB/PDF files to upload to your vault"}
-                      </span>
-                    </label>
-                    {vaultPhase === "upload" && (
-                      <div className="vault-progress" aria-hidden="true">
-                        <span style={{ width: `${vaultPct}%` }} />
-                      </div>
-                    )}
-                    {vaultNote && <p className="vault-note">{vaultNote}</p>}
-                    <p className="modal-hint">
-                      Files go to your private vault ({vaultStatus.repo}) and are
-                      published to every device after CI encrypts them.
-                    </p>
-                    <div className="vault-meta-row">
-                      <button
-                        type="button"
-                        className="secondary-action vault-disconnect"
-                        onClick={() => {
-                          vaultDisconnect();
-                          setVaultNote("");
-                          setShowVaultSetup(false);
-                          setShowWatchSetup(false);
-                          setWatchDone(false);
-                        }}
-                        title="Forget the vault token on this device"
-                      >
-                        Disconnect vault
-                      </button>
-                      {!canWatchDeploys() && !watchDone && (
-                        <button
-                          type="button"
-                          className="secondary-action vault-disconnect"
-                          onClick={() => setShowWatchSetup((v) => !v)}
-                          title="Live “Deploying…” status and auto-pin after each upload"
-                        >
-                          Add deploy watching
-                        </button>
-                      )}
-                    </div>
-                    {watchDone && !canWatchDeploys() && (
-                      <p className="vault-note">
-                        Deploy watching is on — uploads now show live
-                        “Deploying…” status.
-                      </p>
-                    )}
-                    {showWatchSetup && (
-                      <div className="vault-connect">
-                        <label className="field">
-                          <span>Leaf repo (owner/name)</span>
-                          <input
-                            type="text"
-                            value={watchLeafRepo}
-                            onChange={(e) => setWatchLeafRepo(e.target.value)}
-                            placeholder="your-name/leaf"
-                            autoComplete="off"
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Token with Actions: Read on the Leaf repo</span>
-                          <input
-                            type="password"
-                            value={watchToken}
-                            onChange={(e) => {
-                              setWatchToken(e.target.value);
-                              if (watchError) setWatchError("");
-                            }}
-                            placeholder="github_pat_…"
-                            autoComplete="off"
-                          />
-                        </label>
-                        {watchError && <p className="article-error">{watchError}</p>}
-                        <button
-                          type="button"
-                          className="add-article-btn"
-                          onClick={() => void enableWatch()}
-                          disabled={watchBusy}
-                        >
-                          {watchBusy ? (
-                            <Loader2 className="spin" size={15} />
-                          ) : (
-                            <CloudUpload size={15} />
-                          )}
-                          {watchBusy ? "Checking…" : "Enable deploy watching"}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="modal-file-btn"
-                      onClick={() => setShowVaultSetup((v) => !v)}
-                    >
-                      <CloudUpload size={16} />
-                      Set up vault uploads
-                    </button>
-                    <p className="modal-hint">
-                      Uploads go to your private GitHub vault; once the deploy
-                      finishes, the book shows up under Browse everywhere you use
-                      Leaf.
-                    </p>
-                    {showVaultSetup && (
-                      <div className="vault-connect">
-                        <label className="field">
-                          <span>Fine-grained token (Contents: Read and write)</span>
-                          <input
-                            type="password"
-                            value={vaultToken}
-                            onChange={(e) => {
-                              setVaultToken(e.target.value);
-                              if (vaultError) setVaultError("");
-                            }}
-                            placeholder="github_pat_…"
-                            autoComplete="off"
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Vault repo (owner/name)</span>
-                          <input
-                            type="text"
-                            value={vaultRepo}
-                            onChange={(e) => setVaultRepo(e.target.value)}
-                            placeholder="your-name/book-vault"
-                            autoComplete="off"
-                          />
-                        </label>
-                        <details className="vault-advanced">
-                          <summary>Also watch the Leaf deploy (optional)</summary>
-                          <label className="field">
-                            <span>Leaf repo (owner/name)</span>
-                            <input
-                              type="text"
-                              value={leafRepo}
-                              onChange={(e) => setLeafRepo(e.target.value)}
-                              placeholder="your-name/leaf"
-                              autoComplete="off"
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Token with Actions: Read on the Leaf repo</span>
-                            <input
-                              type="password"
-                              value={vaultLeafToken}
-                              onChange={(e) => setVaultLeafToken(e.target.value)}
-                              placeholder="github_pat_… (leave blank to skip)"
-                              autoComplete="off"
-                            />
-                          </label>
-                        </details>
-                        {vaultError && (
-                          <p className="article-error">{vaultError}</p>
-                        )}
-                        <button
-                          type="button"
-                          className="add-article-btn"
-                          onClick={() => void connectVault()}
-                          disabled={vaultBusy}
-                        >
-                          {vaultBusy ? (
-                            <Loader2 className="spin" size={15} />
-                          ) : (
-                            <CloudUpload size={15} />
-                          )}
-                          {vaultBusy ? "Connecting…" : "Connect vault"}
-                        </button>
-                      </div>
-                    )}
-                  </>
+                {vaultPhase === "upload" && (
+                  <div className="vault-progress" aria-hidden="true">
+                    <span style={{ width: `${vaultPct}%` }} />
+                  </div>
                 )}
+
+                <label
+                  className="gate-remember"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 6,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={alsoUploadToCloud}
+                    onChange={(e) => setAlsoUploadToCloud(e.target.checked)}
+                  />
+                  <span>
+                    Also upload file to Cloud Catalog{" "}
+                    <small style={{ opacity: 0.7 }}>
+                      (optional — makes the full book file downloadable on all
+                      devices)
+                    </small>
+                  </span>
+                </label>
+
+                {vaultNote && <p className="vault-note">{vaultNote}</p>}
+
+                <p className="modal-hint">
+                  Reading progress, stats, and book title/author sync across your
+                  devices automatically when Sync &amp; Backup is connected.
+                </p>
               </>
             )}
 

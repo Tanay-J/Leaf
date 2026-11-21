@@ -9,6 +9,7 @@
 
 const TOKEN_KEYS = new Set([
   "leaf:vault", // GitHub token + repo config for vault uploads
+  "leaf:profile", // User's sync Name + PIN profile
   "leaf:sync", // gist token (legacy article sync)
   "leaf:passphrase", // remembered library decryption passphrase
 ]);

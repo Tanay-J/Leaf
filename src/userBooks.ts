@@ -305,7 +305,7 @@ function typeFromFileName(name: string): BookType | null {
 export async function addLocalBook(
   file: File,
   sha256?: string,
-  meta?: { title?: string; author?: string }
+  meta?: { title?: string; author?: string; targetId?: string }
 ): Promise<{
   book: UserBook;
   added: boolean;
@@ -317,7 +317,23 @@ export async function addLocalBook(
   const list = readAll();
   const title = meta?.title?.trim() || titleFromFileName(file.name);
   const author = meta?.author?.trim();
-  const id = makeId(new Set(list.map((b) => b.id)), file.name, title);
+
+  // If this book was synced from another device (metadata + reading progress
+  // already exist on My Shelf, but no local file is attached here yet),
+  // attach the picked file directly to that existing book ID so progress links up.
+  const syncedEntry = list.find(
+    (b) =>
+      !b.removedAt &&
+      !b.url &&
+      !b.blobKey &&
+      b.type === type &&
+      (meta?.targetId === b.id ||
+        b.title.toLowerCase() === title.toLowerCase() ||
+        b.id === slugify(title))
+  );
+
+  const id =
+    syncedEntry?.id ?? makeId(new Set(list.map((b) => b.id)), file.name, title);
   const blobKey = `file:${id}`;
 
   await saveBookBlob(blobKey, file, sha256);
@@ -326,6 +342,17 @@ export async function addLocalBook(
     void navigator.storage?.persist?.();
   } catch {
     /* unsupported — fine */
+  }
+
+  if (syncedEntry) {
+    const updated: UserBook = {
+      ...syncedEntry,
+      ...(author && !syncedEntry.author ? { author } : {}),
+      blobKey,
+      updatedAt: Date.now(),
+    };
+    persist(list.map((b) => (b.id === id ? updated : b)));
+    return { book: updated, added: true };
   }
 
   const book: UserBook = {

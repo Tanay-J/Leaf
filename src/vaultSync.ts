@@ -21,6 +21,15 @@
  * to the public site happens in CI with BOOKS_PASSPHRASE.
  */
 
+import {
+  fetchAndDecryptAsset,
+  getStoredPassphrase,
+  PassphraseRequiredError,
+  setStoredPassphrase,
+  sha256Hex,
+  WrongPassphraseError,
+} from "./bookCrypto";
+
 export interface VaultConfig {
   /** Fine-grained PAT with Contents: Read and write on the vault repo only. */
   token: string;
@@ -33,11 +42,22 @@ export interface VaultConfig {
   leafToken?: string;
 }
 
+export interface SyncProfile {
+  /** Display / login name, e.g. "tanay". */
+  name: string;
+  /** Personal PIN or passphrase used to isolate & encrypt this user's sync file. */
+  pin: string;
+  /** Deterministic slug+hash identifier for the profile on the sync branch. */
+  profileId: string;
+}
+
 export type VaultState = "disconnected" | "connecting" | "connected" | "error";
 
 export interface VaultStatus {
   state: VaultState;
   repo?: string;
+  profileName?: string;
+  profileId?: string;
   lastError?: string;
 }
 
@@ -61,6 +81,7 @@ export interface DeployWatch {
 }
 
 const STORAGE_KEY = "leaf:vault";
+const PROFILE_KEY = "leaf:profile";
 const API = "https://api.github.com";
 /** The Contents API rejects anything larger. */
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -71,11 +92,62 @@ const WATCH_TIMEOUT_MS = 10 * 60_000;
 export const VAULT_STATUS_EVENT = "leaf:vault-status";
 
 let config: VaultConfig | null = readConfig();
+let profile: SyncProfile | null = readProfile();
 let status: VaultStatus = config
-  ? { state: "connected", repo: config.repo }
+  ? {
+      state: "connected",
+      repo: config.repo,
+      ...(profile
+        ? { profileName: profile.name, profileId: profile.profileId }
+        : {}),
+    }
   : { state: "disconnected" };
 
 /* ---------- config / status ---------- */
+
+function readProfile(): SyncProfile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<SyncProfile>;
+    if (
+      !p ||
+      typeof p.name !== "string" ||
+      typeof p.pin !== "string" ||
+      typeof p.profileId !== "string"
+    ) {
+      return null;
+    }
+    return { name: p.name, pin: p.pin, profileId: p.profileId };
+  } catch {
+    return null;
+  }
+}
+
+function writeProfile(p: SyncProfile | null): void {
+  profile = p;
+  try {
+    if (p) localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+    else localStorage.removeItem(PROFILE_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function getSyncProfile(): SyncProfile | null {
+  return profile ? { ...profile } : null;
+}
+
+/** Secret key derived from the active profile's Name + PIN for payload encryption. */
+export function getProfileEncryptionSecret(): string | null {
+  if (!profile) return null;
+  const cleanName =
+    profile.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "") || "reader";
+  return `leaf-profile:${cleanName}:${profile.pin.trim()}`;
+}
 
 function readConfig(): VaultConfig | null {
   try {
@@ -108,10 +180,15 @@ function writeConfig(c: VaultConfig | null): void {
 }
 
 function setStatus(next: VaultStatus): void {
-  status = next;
+  status = {
+    ...next,
+    ...(profile && next.state === "connected"
+      ? { profileName: profile.name, profileId: profile.profileId }
+      : {}),
+  };
   try {
     window.dispatchEvent(
-      new CustomEvent<VaultStatus>(VAULT_STATUS_EVENT, { detail: { ...next } })
+      new CustomEvent<VaultStatus>(VAULT_STATUS_EVENT, { detail: { ...status } })
     );
   } catch {
     /* SSR / unavailable */
@@ -438,7 +515,135 @@ export async function vaultConnect(input: {
 
 export function vaultDisconnect(): void {
   writeConfig(null);
+  writeProfile(null);
   setStatus({ state: "disconnected" });
+}
+
+export function disconnectProfile(): void {
+  writeProfile(null);
+  setStatus(
+    config
+      ? { state: "connected", repo: config.repo }
+      : { state: "disconnected" }
+  );
+}
+
+/**
+ * Attempts to auto-configure the cloud storage repo + token from the
+ * deploy-time encrypted `books/sync.enc` bundle using the library passphrase.
+ */
+export async function tryBootstrapSyncEnc(
+  libraryPassphrase?: string
+): Promise<
+  | { ok: true }
+  | {
+      ok: false;
+      needsPassphrase?: boolean;
+      needsRepoSetup?: boolean;
+      error: string;
+    }
+> {
+  if (config) return { ok: true };
+  const pw = libraryPassphrase?.trim() || getStoredPassphrase();
+  if (!pw) {
+    return {
+      ok: false,
+      needsPassphrase: true,
+      error: "Enter the library passphrase to unlock cloud sync.",
+    };
+  }
+  try {
+    const raw = await fetchAndDecryptAsset("books/sync.enc", pw);
+    const parsed = JSON.parse(raw) as { repo?: string; token?: string };
+    if (!parsed?.repo || !parsed?.token) {
+      return {
+        ok: false,
+        needsRepoSetup: true,
+        error: "Sync bundle is incomplete — configure repo & token below.",
+      };
+    }
+    if (libraryPassphrase?.trim()) {
+      setStoredPassphrase(libraryPassphrase.trim(), true);
+    }
+    writeConfig({ repo: parsed.repo, token: parsed.token });
+    setStatus({ state: "connected", repo: parsed.repo });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof PassphraseRequiredError) {
+      return {
+        ok: false,
+        needsPassphrase: true,
+        error: "Enter the library passphrase to unlock cloud sync.",
+      };
+    }
+    if (err instanceof WrongPassphraseError) {
+      return {
+        ok: false,
+        needsPassphrase: true,
+        error: "Wrong library passphrase — please check it and try again.",
+      };
+    }
+    return {
+      ok: false,
+      needsRepoSetup: true,
+      error:
+        "Cloud sync bundle (books/sync.enc) not found yet — paste your GitHub repo & token once below, or run a fresh deploy.",
+    };
+  }
+}
+
+/**
+ * Connects a user's personal sync profile using just Name + PIN.
+ * Automatically unlocks the storage repo via `books/sync.enc` (or uses
+ * `customRepo` + `customToken` if provided for local dev / first-time setup).
+ */
+export async function connectProfile(input: {
+  name: string;
+  pin: string;
+  libraryPassphrase?: string;
+  customRepo?: string;
+  customToken?: string;
+}): Promise<
+  | { ok: true; profile: SyncProfile }
+  | {
+      ok: false;
+      needsPassphrase?: boolean;
+      needsRepoSetup?: boolean;
+      error: string;
+    }
+> {
+  const name = input.name.trim();
+  const pin = input.pin.trim();
+  if (name.length < 2) {
+    return { ok: false, error: "Enter a profile name (at least 2 characters)." };
+  }
+  if (pin.length < 4) {
+    return { ok: false, error: "Enter a PIN or passphrase (at least 4 characters)." };
+  }
+
+  // 1. Ensure underlying storage repo is connected
+  if (input.customRepo?.trim() && input.customToken?.trim()) {
+    const res = await vaultConnect({
+      repo: input.customRepo.trim(),
+      token: input.customToken.trim(),
+    });
+    if (!res.ok) return { ok: false, needsRepoSetup: true, error: res.error };
+  } else if (!config) {
+    const boot = await tryBootstrapSyncEnc(input.libraryPassphrase);
+    if (!boot.ok) return boot;
+  }
+
+  // 2. Derive deterministic profileId from name + PIN
+  const cleanName =
+    name.toLowerCase().replace(/[^a-z0-9_-]/g, "") || "reader";
+  const digest = await sha256Hex(`leaf-profile:${cleanName}:${pin}`);
+  const profileId = `${cleanName}-${digest.slice(0, 12)}`;
+  const nextProfile: SyncProfile = { name, pin, profileId };
+  writeProfile(nextProfile);
+  if (config) {
+    setStatus({ state: "connected", repo: config.repo });
+  }
+  return { ok: true, profile: nextProfile };
 }
 
 /* ---------- generic vault text files (used by other sync engines) ---------- */

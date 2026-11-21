@@ -28,11 +28,15 @@ import {
   type SavedArticle,
 } from "./articles";
 import { saveArticleContent } from "./localBooks";
+import { decryptTextWithKey, encryptTextWithKey } from "./bookCrypto";
 import {
   ensureVaultBranch,
+  getProfileEncryptionSecret,
+  getSyncProfile,
   getVaultText,
   isVaultConnected,
   putVaultText,
+  VAULT_STATUS_EVENT,
   VaultConflictError,
   VaultMissingRefError,
 } from "./vaultSync";
@@ -42,6 +46,11 @@ const BACKEND_KEY = "leaf:article-sync";
 /** Vault transport: list file + branch (never triggers a Pages deploy). */
 const LIST_PATH = "articles/reading-list.json";
 const SYNC_BRANCH = "sync";
+
+function activeListPath(): string {
+  const prof = getSyncProfile();
+  return prof ? `profiles/${prof.profileId}/articles.json` : LIST_PATH;
+}
 const VAULT_COMMIT_MSG = "Sync reading list (Leaf)";
 const GIST_DESCRIPTION = "Leaf — reading list";
 const GIST_FILENAME = "leaf-reading-list.json";
@@ -336,26 +345,52 @@ async function pushGist(list: SavedArticle[]): Promise<void> {
 /* ---------- vault transport ---------- */
 
 async function pullVault(): Promise<SavedArticle[]> {
-  const entry = await getVaultText(LIST_PATH, SYNC_BRANCH);
+  const path = activeListPath();
+  const entry = await getVaultText(path, SYNC_BRANCH);
   vaultSha = entry?.sha ?? null;
-  const parsed = entry?.content ? deserialize(entry.content) : null;
-  return parsed ?? [];
+  if (!entry?.content) return [];
+  try {
+    let rawJson = entry.content;
+    const outer = JSON.parse(rawJson) as {
+      encrypted?: number;
+      data?: string;
+    };
+    if (outer && outer.encrypted === 1 && typeof outer.data === "string") {
+      const secret = getProfileEncryptionSecret();
+      if (!secret) return [];
+      rawJson = await decryptTextWithKey(outer.data, secret);
+    }
+    return deserialize(rawJson) ?? [];
+  } catch {
+    return deserialize(entry.content) ?? [];
+  }
 }
 
 async function pushVault(list: SavedArticle[]): Promise<void> {
+  const path = activeListPath();
+  const prof = getSyncProfile();
+  const message = prof
+    ? `Sync reading list for ${prof.name} (Leaf)`
+    : VAULT_COMMIT_MSG;
+  let payload = serialize(list);
+  const secret = getProfileEncryptionSecret();
+  if (secret) {
+    const cipher = await encryptTextWithKey(payload, secret);
+    payload = JSON.stringify({ encrypted: 1, data: cipher });
+  }
   try {
-    vaultSha = await putVaultText(LIST_PATH, serialize(list), {
+    vaultSha = await putVaultText(path, payload, {
       ref: SYNC_BRANCH,
-      message: VAULT_COMMIT_MSG,
+      message,
       ...(vaultSha ? { sha: vaultSha } : {}),
     });
   } catch (err) {
     if (!(err instanceof VaultMissingRefError)) throw err;
     // First sync on this vault — bootstrap the branch and retry.
     await ensureVaultBranch(SYNC_BRANCH);
-    vaultSha = await putVaultText(LIST_PATH, serialize(list), {
+    vaultSha = await putVaultText(path, payload, {
       ref: SYNC_BRANCH,
-      message: VAULT_COMMIT_MSG,
+      message,
     });
   }
 }
@@ -513,6 +548,19 @@ export function initSync(): void {
   initialized = true;
   try {
     window.addEventListener(ARTICLES_CHANGED_EVENT, onArticlesChanged);
+    window.addEventListener(VAULT_STATUS_EVENT, () => {
+      vaultSha = null;
+      const backend = activeBackend();
+      setStatus(
+        backend
+          ? {
+              state: "connected",
+              lastSyncedAt: meta?.lastSyncedAt ?? null,
+              backend,
+            }
+          : { state: "disconnected", lastSyncedAt: null, backend: null }
+      );
+    });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState !== "visible") return;
       if (!activeBackend()) return;

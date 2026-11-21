@@ -5,6 +5,8 @@ import {
   Check,
   Link2,
   Newspaper,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Star,
   Tag,
@@ -186,7 +188,10 @@ export default function ArticlesList({
           <button
             type="button"
             className={`text-nav-btn${filter === "all" ? " active" : ""}`}
-            onClick={() => setFilter("all")}
+            onClick={() => {
+              setFilter("all");
+              setListMinimized(false);
+            }}
           >
             <span>All Articles</span>
             <span className="nav-count">{activeCount}</span>
@@ -194,7 +199,10 @@ export default function ArticlesList({
           <button
             type="button"
             className={`text-nav-btn${filter === "unread" ? " active" : ""}`}
-            onClick={() => setFilter("unread")}
+            onClick={() => {
+              setFilter("unread");
+              setListMinimized(false);
+            }}
           >
             <span>Unread</span>
             <span className="nav-count">{unreadCount}</span>
@@ -202,7 +210,10 @@ export default function ArticlesList({
           <button
             type="button"
             className={`text-nav-btn${filter === "starred" ? " active" : ""}`}
-            onClick={() => setFilter("starred")}
+            onClick={() => {
+              setFilter("starred");
+              setListMinimized(false);
+            }}
           >
             <span>Starred</span>
             <span className="nav-count">{starredCount}</span>
@@ -210,7 +221,10 @@ export default function ArticlesList({
           <button
             type="button"
             className={`text-nav-btn${filter === "archived" ? " active" : ""}`}
-            onClick={() => setFilter("archived")}
+            onClick={() => {
+              setFilter("archived");
+              setListMinimized(false);
+            }}
           >
             <span>Archived</span>
             <span className="nav-count">{archivedCount}</span>
@@ -261,19 +275,30 @@ export default function ArticlesList({
                     ? "Starred"
                     : "Archived"}
             </h2>
-            {activeTag && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {activeTag && (
+                <button
+                  type="button"
+                  className="active-tag-Indicator"
+                  onClick={() => setActiveTag(null)}
+                  title="Clear tag filter"
+                >
+                  <span>
+                    #{activeTag === "__untagged__" ? "Untagged" : formatTagLabel(activeTag)}
+                  </span>
+                  <X size={11} />
+                </button>
+              )}
               <button
                 type="button"
-                className="active-tag-Indicator"
-                onClick={() => setActiveTag(null)}
-                title="Clear tag filter"
+                className="icon-btn"
+                onClick={() => setListMinimized(true)}
+                title="Collapse reading list"
+                aria-label="Collapse reading list"
               >
-                <span>
-                  #{activeTag === "__untagged__" ? "Untagged" : formatTagLabel(activeTag)}
-                </span>
-                <X size={11} />
+                <PanelLeftClose size={15} />
               </button>
-            )}
+            </div>
           </div>
 
           <form className="add-article compact-add-article" onSubmit={submit}>
@@ -521,6 +546,17 @@ export default function ArticlesList({
               <Newspaper size={28} />
               <strong>Select an article to read</strong>
               <p>Paste a link on the left or pick an item from your Reading List.</p>
+              {listMinimized && (
+                <button
+                  type="button"
+                  className="secondary-action"
+                  onClick={() => setListMinimized(false)}
+                  style={{ marginTop: 8 }}
+                >
+                  <PanelLeftOpen size={14} />
+                  Show Reading List
+                </button>
+              )}
             </div>
           )}
         </section>

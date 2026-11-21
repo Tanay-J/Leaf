@@ -337,14 +337,14 @@ export default function ArticleReader({
               type="button"
               className="secondary-action"
               onClick={onToggleList}
-              title={listMinimized ? "Show reading list" : "Expand reading area"}
+              title={listMinimized ? "Show reading list" : "Collapse reading list"}
             >
               {listMinimized ? (
                 <PanelLeftOpen size={15} />
               ) : (
                 <PanelLeftClose size={15} />
               )}
-              {listMinimized ? "Show List" : "Focus"}
+              {listMinimized ? "Show List" : "Hide List"}
             </button>
           ) : (
             <button className="secondary-action" onClick={() => navigate("#/articles")}>
